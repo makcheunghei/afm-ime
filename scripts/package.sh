@@ -2,6 +2,7 @@
 # 打包单一产物 build/AFM輸入法.app = 输入法引擎 + 内嵌设置中心(Contents/PlugIns/AFMSettings.app)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+mkdir -p build
 
 if [ ! -s Data/dict.bin ]; then
   zsh scripts/fetch_pinyin_dict.sh
