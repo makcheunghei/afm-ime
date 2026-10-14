@@ -1,10 +1,20 @@
-# AFM拼音 (afm-ime)
+# AFM輸入法 (afm-ime)
 
-macOS 液态玻璃(Liquid Glass)风格中文拼音输入法,大模型增强候选预测:**端侧 Apple Foundation Models**(隐私安全,离线可用)+ **可选云端模型**(OpenAI 兼容 / Anthropic,设置中心配置)。**纯 Swift、无第三方依赖;macOS 27+,需要 Xcode 构建(水滴折射依赖其 Metal 工具链)**。
+同一個 macOS App 提供 **AFM拼音**及新增的 **AFM速成**兩個系統輸入來源，共用設定中心及 Liquid Glass 框架。拼音保留原有引擎、完整詞庫及模型功能；繁體速成使用從 Windows 提取的原生字碼及聯想資料，預設固定次序，完整字集、個人學習及 AI 重排均可獨立手動開啟。
+
+**純 Swift、無第三方依賴，macOS 27+。**可用 Xcode 27 或 Command Line Tools 27 構建；拼音水滴的 Metal 折射效果需要 Xcode Metal 工具鏈。AI 可使用本機 Apple Foundation Models，或手動啟用已配置的雲端模型。
 
 ![平台](https://img.shields.io/badge/macOS-27%20(Apple%20Intelligence)-blue) ![构建](https://img.shields.io/badge/Swift-6.4%20·%20Xcode%2027-orange)
 
-## 功能
+## 繁體速成
+
+- **Windows 操作習慣**：每頁 9 個候選；一碼先顯示預覽，空格開窗；雙碼自動開窗；數字選字、Enter 選取高亮候選、空格／Page Down 翻頁、Page Up 返回、Tab 展開兩列。
+- **原生聯想**：選字後顯示續文，以 Shift＋1–9 選取；聯想提交後關窗，不再自動連鎖開窗。
+- **固定字序為預設**：完整字集及速成個人學習各有獨立開關，預設關閉；學習資料與拼音分開，關閉時不寫入速成學習資料。
+- **速成 AI 預設關閉**：開啟後保留第一候選，推薦放第二位並標記 ✦；導航、翻頁或展開後鎖定本次次序。雲端有另一個獨立開關，未開啟時只使用本機模型。
+- **已核對的 Windows 樣本**：`aa` 的 18 個候選及「你、晶、香、港、好、暑」六組聯想。全碼排序、擴展字篩選及其他字詞仍需逐步對照，現階段不保證所有字碼與 Windows 完全一致。資料來源、數量及驗證範圍見 [速成說明](docs/quick.md)。
+
+## 拼音及共用功能
 
 - **词典引擎**:多源词库 **698.6 万条**(含简拼派生键,原始词条 ~350 万),编译为二进制 `dict.bin`,mmap 零拷贝加载(<1ms),热循环查询 ~0.2ms
   - rime-ice 雾凇拼音(tencent 98w + base 55w + ext 34w + 8105 单字)
@@ -42,29 +52,33 @@ macOS 液态玻璃(Liquid Glass)风格中文拼音输入法,大模型增强候�
 
 ## 构建 / 安装
 
-**需要 Xcode 27+**(主构建路径;Metal 工具链是 Xcode 的独立组件,首次需单独下载一次)。
+使用 macOS 27 SDK。Xcode 27 是主構建路徑；沒有 Xcode 時自動使用 Command Line Tools，保留 Liquid Glass 候選窗，拼音水滴沒有 Metal 折射。
 
 ```sh
 # Metal 工具链组件(~839MB,一次;DEVELOPER_DIR 指向你的 Xcode 安装)
 DEVELOPER_DIR=/Applications/Xcode-beta.app xcodebuild -downloadComponent metalToolchain
 
-scripts/build_dict.sh       # 词库源变更后全量重编 Data/dict.bin(rime-ice+外部词库,~22s)
-scripts/package.sh          # xcodebuild(macOS 27 SDK)+ Metal shader → default.metallib
-                            # 未装 Xcode 自动回退 swift build(CLT):可构建,但水滴无折射
+scripts/fetch_pinyin_dict.sh # 缺少 dict.bin 時，從固定上游發行版提取完整詞庫並核對 SHA-256
+python3 scripts/build_quick.py # 從 quickime/ 的原生 Windows 檔案生成 Data/quick.json
+scripts/package.sh          # 打包同時包含拼音及速成的 App
+scripts/test.sh             # Swift Testing 行為測試（包含 CLT framework 路徑處理）
+"build/AFM輸入法.app/Contents/MacOS/AFMInput" --check-quick # 打包後的資料／按鍵整合檢查
+# 有完整拼音源時，可用 scripts/build_dict.sh 重新編譯 dict.bin
 ```
 
-产物 `build/AFM拼音.app` = 输入法引擎 + 内嵌设置中心(`Contents/PlugIns/AFMSettings.app`,顶层只有一个 App 条目)。
+產物 `build/AFM輸入法.app` 包含輸入法引擎及內嵌設定中心（`Contents/PlugIns/AFMSettings.app`），頂層只有一個 App。速成原始資料及生成的詞庫不納入 Git；本地所需檔案與自訂來源參數見 [速成說明](docs/quick.md)。
 
-- **首次安装**:`open build/AFM拼音.app` → 未安装态自动弹设置中心 → 「安装并启用」(或命令行 `scripts/install.sh`),然后**注销并重新登录一次**(TIS 登录扫描收录);之后装卸永久生效
-- **分发(.pkg)**:`scripts/make_pkg.sh` 出 `build/AFM拼音-<版本>.pkg`——装到系统级 `/Library/Input Methods`(双击安装,管理员授权;首次同样需注销重登一次)。未签名:`sudo installer -pkg AFM拼音-<版本>.pkg -target /` 可直接装;升级安装幂等(已启用不触碰 TIS,无需注销)。已有用户级安装的机器先跑 `AFMInput --uninstall` 再装,避免双份
-- **日常更新(部署铁律)**:重跑 package.sh 后**只做换盘+重启输入法,不要跑 install.sh**(它的 enable 流程会把输入源摘掉):
+- **首次安裝**：`open build/AFM輸入法.app` → 設定中心「安裝並啟用」，或執行 `scripts/install.sh`，預設安裝到 `~/Library/Input Methods/AFM輸入法.app`。首次安裝或加入新模式時，系統可能要你**儲存工作後自行登出再登入**；之後執行 `scripts/post-login-check.sh` 完成啟用。
+- **切換來源**：macOS 輸入來源列表分別提供「AFM拼音」及「AFM速成」。設定中心「設定」頁有獨立的「繁體速成」選項。
+- **安裝包**：`scripts/make_pkg.sh` 產生 `build/AFM輸入法-<版本>.pkg`，安裝到系統級 `/Library/Input Methods`，由系統要求管理員授權。自用 App 使用本機簽名；目前不包含 Developer ID 公證。
+- **日常更新**：重新執行 package.sh，再從新包的設定中心使用「更新輸入法」；兩個模式已啟用時會保留啟用狀態。命令行亦可使用 `scripts/install.sh`，它會先檢查速成資源，再換盤及補齊缺少的模式，不會先停用所有輸入來源。
 
-  ```sh
-  rm -rf ~/Library/Input\ Methods/AFM拼音.app && cp -R build/AFM拼音.app ~/Library/Input\ Methods/ && killall AFMInput && open ~/Library/Input\ Methods/AFM拼音.app
-  ```
+用 `"build/AFM輸入法.app/Contents/MacOS/AFMInput" --status` 可唯讀查閱兩個模式的註冊及啟用狀態；`--check-quick` 不初始化 IMKServer，也不修改系統輸入來源。
 
 ## 使用
 
+- **AFM速成**：切換系統來源後，以 `aa` 測試兩頁候選；以 `of`、`2`、Shift＋`1` 測試「你們」。空格在聯想窗不選第一項；普通數字亦不選聯想。Backspace 在組碼時一次取消整個碼，Esc 取消組字或關閉聯想。
+- 以下為原有 **AFM拼音**及共用快捷鍵：
 - `Ctrl+Space` 或菜单栏切换到 AFM拼音;**轻点 `Shift` 中英切换**(系统级监听、全部应用生效,跨重启记忆;英文模式无候选框、标点半角直通)
 - 中文模式:打拼音 → 数字 `1-8` 选词 / `空格` 上屏高亮候选 / `回车` 上屏拼音原文(网格展开时回车=空格上屏选中);选中候选为透明水滴,**按住左右拖动,松手吸附上屏**(设置中心「测试」可开「固定透镜」模式:水滴钉在原地,整条候选栏从它下面滑过)
 - `←→` 移动高亮(越过第 8 个自动展开网格),`↓` 展开候选网格(8 列,滚轮/滚动条滚动、边缘跟随,移回首行或顶行 `↑` 收起),`=`/`-` 翻页,候选条 `▾`/`▴` 展开收起,`Esc` 取消组词;网格内数字键按水滴所在行的 1-8 选词
@@ -86,7 +100,8 @@ scripts/debug.sh --stop # 关闭 debug(标志文件 /tmp/afm-ime-debug)
 Sources/
 ├── IMECore/        # 引擎核心:词库(DictStore mmap)、拼音切分、候选引擎、FM 层(FMReranker 统一出口:
 │                   #   云端 CloudProvider → 端侧 FoundationModels → 纯词典)、用户词频与用户词库、
-│                   #   模型偏好(ModelPrefs/CloudProvider)、TIS 安装器、debug 日志
+│                   #   模型偏好(ModelPrefs/CloudProvider)、TIS 安装器、debug 日志、
+│                   #   速成資料(QuickDictionary)、查表／學習(QuickEngine)、按鍵狀態機(QuickSession)
 ├── AFMInput/       # 输入法主体(IMKServer/InputController/液态玻璃候选窗+水滴/⌃V·⌃F 伴随面板/
 │                   #   Shift 中英监听)+ 安装 CLI
 ├── AFMApp/         # 设置中心(六区;打包为引擎 bundle 内 PlugIns/AFMSettings.app 独立进程)
@@ -96,7 +111,9 @@ Sources/
 vendor/             # 词库源 + 参考实现(rime-ice、squirrel、fcitx5-macos、AndroidLiquidGlass 等)
 Experiments/        # FM 框架测绘、梗合集词库等实验材料
 scripts/            # package / build_dict / install / uninstall / debug 等全部脚本
-Data/dict.bin       # 编译产物(git 忽略,build_dict.sh 重新生成)
+Data/dict.bin       # 拼音詞庫（Git 忽略，可從固定上游封包取回或 build_dict.sh 重新生成）
+Data/quick.json     # 速成詞庫／聯想（Git 忽略，build_quick.py 生成）
+Tests/IMECoreTests/ # 速成引擎、狀態機、AI 鎖定、學習開關及 Unicode 行為測試
 ```
 
 ## 性能(本机 macOS 27 / M 系列)

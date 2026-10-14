@@ -757,14 +757,21 @@ final class CandidateWindowController {
     private var glassView: NSView?
     private var barHosting: NSHostingView<CandidateBarView>?
     private var overlayHosting: NSHostingView<DropletOverlayView>?
+    private var quickPanel: NSPanel?
+    private var quickContainerView: NSView?
+    private var quickGlassView: NSGlassEffectView?
+    private var quickHost: NSHostingView<QuickCandidateView>?
     private var onSelect: (Int) -> Void = { _ in }
     private var onToggleExpand: () -> Void = {}
 
     /// 候选窗玻璃条 frame 变化回调(nil = 隐藏);伴随面板据此重新浮动定位
     var onFrameChange: ((NSRect?) -> Void)?
-    var currentFrame: NSRect { panel?.frame ?? NSRect.null }
+    var currentFrame: NSRect {
+        if quickPanel?.isVisible == true { return quickPanel?.frame ?? .null }
+        return panel?.frame ?? .null
+    }
 
-    var isVisible: Bool { panel?.isVisible ?? false }
+    var isVisible: Bool { (panel?.isVisible ?? false) || (quickPanel?.isVisible ?? false) }
 
     /// 固定透镜拖拽:整条 bar(面板)刚体平移(x 钳在屏幕内;y 不变)。
     /// 面板几何变了,水滴模型基准同步(词屏幕冻结的补偿依赖它)。
@@ -828,6 +835,7 @@ final class CandidateWindowController {
               droplet: CandidateDropletModel,
               caretRect: NSRect, onSelect: @escaping (Int) -> Void,
               onToggleExpand: @escaping () -> Void = {}) {
+        quickPanel?.orderOut(nil)
         let panel = ensurePanel()
         self.onSelect = onSelect
         self.onToggleExpand = onToggleExpand
@@ -879,8 +887,95 @@ final class CandidateWindowController {
         droplet.applyPanelGeometry(originX: panel.frame.origin.x)
     }
 
+    /// 顯示 Quick 候選面板。items 保留全量候選及其全域 index，點選回傳該 index。
+    func showQuick(items: [CandidateItem], selectedIndex: Int, pageStart: Int,
+                   pageSize: Int = 9, expanded: Bool, association: Bool,
+                   caretRect: NSRect, onSelect: @escaping (Int) -> Void,
+                   onPreviousPage: @escaping () -> Void,
+                   onNextPage: @escaping () -> Void,
+                   onToggleExpand: @escaping () -> Void) {
+        panel?.orderOut(nil)
+        onFrameChange?(nil)
+        let panel = ensureQuickPanel()
+        guard let host = quickHost, let container = quickContainerView,
+              let glass = quickGlassView else { return }
+
+        host.rootView = QuickCandidateView(
+            items: items, selectedIndex: selectedIndex, pageStart: pageStart,
+            pageSize: pageSize, expanded: expanded, association: association,
+            onSelect: onSelect, onPreviousPage: onPreviousPage,
+            onNextPage: onNextPage, onToggleExpand: onToggleExpand)
+
+        let desired = host.fittingSize
+        let screen = screen(for: caretRect)
+        let visible = screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let size = NSSize(width: min(desired.width, visible.width),
+                          height: min(desired.height, visible.height))
+        panel.setContentSize(size)
+        container.frame = NSRect(origin: .zero, size: size)
+        host.frame = container.bounds
+        glass.frame = container.bounds
+
+        var origin: NSPoint
+        if caretRect.isNull {
+            origin = NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 24)
+        } else {
+            origin = NSPoint(x: caretRect.minX, y: caretRect.minY - size.height - 8)
+            if origin.y < visible.minY + 4 { origin.y = caretRect.maxY + 8 }
+        }
+        origin.x = min(max(origin.x, visible.minX + 4),
+                       max(visible.minX + 4, visible.maxX - size.width - 4))
+        origin.y = min(max(origin.y, visible.minY + 4),
+                       max(visible.minY + 4, visible.maxY - size.height - 4))
+        panel.setFrameOrigin(origin)
+        panel.orderFront(nil)
+        DebugLog.log("quick layout panel=\(NSStringFromRect(panel.frame)) glass=\(NSStringFromRect(glass.frame)) caret=\(NSStringFromRect(caretRect)) screen=\(screen?.localizedName ?? "?") 候選=\(items.count) 起點=\(pageStart) 展開=\(expanded) 聯想=\(association)")
+    }
+
+    private func ensureQuickPanel() -> NSPanel {
+        if let quickPanel { return quickPanel }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = true
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        container.wantsLayer = true
+        let host = NSHostingView(rootView: QuickCandidateView(
+            items: [], selectedIndex: 0, pageStart: 0, pageSize: 9,
+            expanded: false, association: false, onSelect: { _ in },
+            onPreviousPage: {}, onNextPage: {}, onToggleExpand: {}))
+        let glass = NSGlassEffectView()
+        glass.cornerRadius = 18
+        glass.effectIsInteractive = true
+        glass.contentView = host
+        container.addSubview(glass)
+        panel.contentView = container
+
+        quickContainerView = container
+        quickGlassView = glass
+        quickHost = host
+        quickPanel = panel
+        return panel
+    }
+
+    private func screen(for caretRect: NSRect) -> NSScreen? {
+        guard !caretRect.isNull else { return NSScreen.main }
+        let point = NSPoint(x: caretRect.midX, y: caretRect.midY)
+        return NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main
+    }
+
     func hide() {
         panel?.orderOut(nil)
+        quickPanel?.orderOut(nil)
         onFrameChange?(nil)
     }
 }

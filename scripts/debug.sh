@@ -18,12 +18,19 @@ if [[ "${1:-}" == "--stop" ]]; then
 fi
 
 touch "$FLAG"
-: > "$LOG"
+if [ -f "$LOG" ]; then
+  LOG_ARCHIVE=$(mktemp "${LOG}.previous.XXXXXX")
+  mv "$LOG" "$LOG_ARCHIVE"
+fi
+touch "$LOG"
 
 # 让系统重新拉起(launchd 管理,别手动 nohup——手动进程客户端连不上)
-open "$HOME/Library/Input Methods/AFM拼音.app" 2>/dev/null || true
+APP="$HOME/Library/Input Methods/AFM輸入法.app"
+[ -d "$APP" ] || APP="/Library/Input Methods/AFM輸入法.app"
+[ -d "$APP" ] || { echo "請先安裝 AFM輸入法。"; exit 1; }
+open "$APP" 2>/dev/null || true
 sleep 1
-echo "AFM拼音 debug 已开启(PID $(pgrep -x AFMInput | head -1)) 日志: $LOG"
-echo "若切换输入法后仍无日志,切到 ABC 再切回 AFM拼音 触发重连"
+echo "AFM輸入法 debug 已開啟(PID $(pgrep -x AFMInput | head -1)) 日誌: $LOG"
+echo "若切換輸入來源後仍無日誌，切到 ABC 再切回 AFM拼音／AFM速成觸發重連"
 echo "================================================"
 tail -f "$LOG"

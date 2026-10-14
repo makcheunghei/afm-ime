@@ -2,7 +2,11 @@
 build/
 vendor/
 Data/dict.bin
+Data/quick.json
+/quickime/
 proto/bench_fm
 *.o
+*.profraw
+*.profdata
 .DS_Store
 .swiftpm/

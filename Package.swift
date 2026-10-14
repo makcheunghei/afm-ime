@@ -14,6 +14,7 @@ let package = Package(
         .executableTarget(name: "dbg", dependencies: ["IMECore"], path: "Sources/Debug"),
         .executableTarget(name: "afm-input", dependencies: ["IMECore"], path: "Sources/AFMInput"),
         .executableTarget(name: "afm-app", dependencies: ["IMECore"], path: "Sources/AFMApp"),
+        .testTarget(name: "IMECoreTests", dependencies: ["IMECore"], path: "Tests/IMECoreTests"),
     ],
     swiftLanguageModes: [.v5]
 )

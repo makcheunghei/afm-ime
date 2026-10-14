@@ -1,11 +1,11 @@
 #!/bin/bash
-# 完全卸载 AFM拼音:进程、bundle、defaults 启用条目
+# 完全卸載 AFM輸入法:程序、bundle、defaults 啟用條目
 # 注: TIS 注册表条目会在下次注销重登时由登录扫描自动清除
 set -euo pipefail
 
 killall AFMInput 2>/dev/null || true
-rm -rf "$HOME/Library/Input Methods/AFM拼音.app"
-sudo -n rm -rf "/Library/Input Methods/AFM拼音.app" 2>/dev/null || true
+rm -rf "$HOME/Library/Input Methods/AFM輸入法.app" "$HOME/Library/Input Methods/AFM拼音.app"
+sudo -n rm -rf "/Library/Input Methods/AFM輸入法.app" "/Library/Input Methods/AFM拼音.app" 2>/dev/null || true
 
 TMP=$(mktemp /tmp/hitoolbox.XXXXXX.plist)
 defaults export com.apple.HIToolbox "$TMP"
@@ -26,4 +26,4 @@ print(f"defaults 清理: 移除 {removed} 条")
 EOF
 defaults import com.apple.HIToolbox "$TMP"
 rm -f "$TMP"
-echo "卸载完成。TIS 注册表残留会在下次注销重登时自动清除。"
+echo "卸載完成。TIS 註冊表殘留會在下次登出再登入時自動清除。"

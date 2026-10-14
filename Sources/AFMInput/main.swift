@@ -10,21 +10,81 @@ if cliArgs.count > 1 {
     case "--register-input-source", "--install": code = Installer.register()
     case "--enable-input-source": code = Installer.enable()
     case "--select-input-source": code = Installer.select()
+    case "--select-quick", "--select-quick-input-source": code = Installer.selectQuick()
+    case "--check-quick": code = checkQuickData()
+    case "--status": code = Installer.status()
     case "--setup": code = Installer.setup() // 单进程连续 register+enable+select,避开 cfprefsd 冲掉瞬态注册
     case "--ensure-enabled": code = Installer.ensureEnabled() // 幂等启用(pkg postinstall 用,已启用不碰活视图)
     case "--uninstall": code = { print(IMEInstaller.uninstall()); return 0 }()
     case "--quit": code = Installer.quitRunning()
     default:
-        print("用法: AFMInput [--register-input-source|--enable-input-source|--ensure-enabled|--select-input-source|--setup|--uninstall|--quit]")
+        print("用法: AFMInput [--register-input-source|--enable-input-source|--ensure-enabled|--select-input-source|--select-quick|--check-quick|--status|--setup|--uninstall|--quit]")
         code = 2
     }
     exit(code)
 }
 
+/// 資料與按鍵整合驗證；不初始化 IMKServer，不註冊或改變系統輸入來源。
+func checkQuickData() -> Int32 {
+    if let controllerName = Bundle.main.object(forInfoDictionaryKey: "InputMethodServerControllerClass") as? String,
+       NSClassFromString(controllerName) == nil {
+        print("IMK controller 類別無法載入：\(controllerName)")
+        return 1
+    }
+    guard let engine = InputController.quickEngine else {
+        print("速成資料載入失敗")
+        return 1
+    }
+    let aa = Array("昌晶暑間暗曙昍暙闍閶閽闇晿暏彞龧𣊫𣊭").map(String.init)
+    let samples: [String: [String]] = [
+        "你": ["們", "我", "老", "等", "死我活", "推我讓"],
+        "晶": ["片", "瑩剔透", "瑩", "體", "亮", "狀體", "粒"],
+        "香": ["港", "水", "煙", "蕉", "味", "腸", "菸", "包", "菇"],
+        "港": ["務局", "口", "都", "澳", "警", "市", "警所", "幣", "務"],
+        "好": ["像", "處", "幾", "奇", "手", "轉", "評", "不容易", "看"],
+        "暑": ["假", "期", "氣", "熱", "氣逼人"],
+    ]
+    guard engine.candidates(for: "aa") == aa,
+          samples.allSatisfy({ text, expected in Array(engine.associations(after: text).prefix(expected.count)) == expected }),
+          engine.candidates(for: "aa", fullCharset: true).starts(with: aa),
+          engine.candidates(for: "za", fullCharset: true).contains("　") else {
+        print("速成資料與 Windows 參考案例不一致")
+        return 1
+    }
+    let session = QuickSession(engine: engine)
+    _ = session.handle(.letter("a"))
+    _ = session.handle(.letter("a"))
+    _ = session.handle(.space)
+    session.updateOptions(fullCharset: false, learning: false)
+    guard session.handle(.enter).commits == ["閶"] else {
+        print("速成翻頁／設定快照／選字整合失敗")
+        return 1
+    }
+    session.reset()
+    _ = session.handle(.letter("o"))
+    _ = session.handle(.letter("f"))
+    guard session.handle(.digit(2, shifted: false)).commits == ["你"],
+          session.handle(.digit(1, shifted: true)).commits == ["們"],
+          !session.isAssociation else {
+        print("速成聯想提交整合失敗")
+        return 1
+    }
+    let start = Date()
+    let lookupCodes = ["aa", "of", "ha", "hu", "a", "za", "bu", "ub", "nx", "ux"]
+    var checkedCandidates = 0
+    for index in 0..<10_000 {
+        checkedCandidates &+= engine.candidates(for: lookupCodes[index % lookupCodes.count], fullCharset: true).count
+    }
+    let averageMS = Date().timeIntervalSince(start) * 1000 / 10_000
+    print("速成驗證通過：aa 18 字、六組聯想、翻頁選字、聯想提交、完整字集及 Unicode")
+    print(String(format: "全字集查表平均 %.4f ms（10,000 次，候選數校驗 %d）", averageMS, checkedCandidates))
+    return 0
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20260915-kb40"
+    static let buildTag = "20261014-quick1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端

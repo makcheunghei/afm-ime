@@ -11,6 +11,8 @@ import Foundation
 public enum IMEInstaller {
     public static let bundleID = "moe.bemly.inputmethod.AfmIME"
     public static let modeID = "moe.bemly.inputmethod.AfmIME.afmpinyin.hans"
+    public static let quickModeID = InputMethodMode.quick.sourceID
+    public static let modeIDs = InputMethodMode.allCases.map(\.sourceID)
     /// 历史遗留 id(清理用)
     public static let legacyBundleIDs: Set<String> = [
         "com.afm.inputmethod.afmpinyin", "com.afm.inputmethod.afmpinyin.hans",
@@ -20,7 +22,8 @@ public enum IMEInstaller {
         "moe.bemly.inputmethod.afmpinyin", "moe.bemly.inputmethod.afmpinyin.hans",
         "moe.bemly.inputmethod.AfmIME.afmpinyin", "moe.bemly.inputmethod.AfmIME.afmpinyin.hans",
     ]
-    public static let imeAppName = "AFM拼音.app"
+    public static let imeAppName = "AFM輸入法.app"
+    public static let legacyIMEAppName = "AFM拼音.app"
     public static let toolboxDomain = "com.apple.HIToolbox" as CFString
 
     // MARK: - 查询
@@ -49,7 +52,7 @@ public enum IMEInstaller {
     public static func afmRefs() -> [TISInputSource] {
         allSources().filter {
             let id = strProp($0, kTISPropertyInputSourceID)
-            return id == modeID || id == bundleID || legacyBundleIDs.contains(id)
+            return modeIDs.contains(id) || id == bundleID || legacyBundleIDs.contains(id)
         }
     }
 
@@ -59,12 +62,18 @@ public enum IMEInstaller {
     }
 
     /// TIS 启用视图中本输入法实例数
-    public static func enabledRefCount() -> Int {
-        enabledSources().filter { strProp($0, kTISPropertyInputSourceID) == modeID }.count
+    public static func enabledRefCount(for mode: InputMethodMode = .pinyin) -> Int {
+        enabledSources().filter { strProp($0, kTISPropertyInputSourceID) == mode.sourceID }.count
+    }
+
+    public static func enabledRefCount() -> Int { enabledRefCount(for: .pinyin) }
+
+    public static func registeredModeIDs() -> [String] {
+        modeIDs.filter { sourceWithID($0) != nil }
     }
 
     public static func isRegistered() -> Bool {
-        sourceWithID(modeID) != nil
+        registeredModeIDs().count == modeIDs.count
     }
 
     public static func installedIMEURL() -> URL {
@@ -77,28 +86,47 @@ public enum IMEInstaller {
         URL(fileURLWithPath: "/Library/Input Methods/\(imeAppName)")
     }
 
+    public static var legacyInstalledIMEURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Input Methods/\(legacyIMEAppName)")
+    }
+
+    public static var legacySystemIMEURL: URL {
+        URL(fileURLWithPath: "/Library/Input Methods/\(legacyIMEAppName)")
+    }
+
     /// 全部在位安装位(用户级 + 系统级;.pkg 装系统级,GUI/脚本装用户级)
     public static func installedURLs() -> [URL] {
-        [installedIMEURL(), systemIMEURL].filter { FileManager.default.fileExists(atPath: $0.path) }
+        [installedIMEURL(), systemIMEURL, legacyInstalledIMEURL, legacySystemIMEURL]
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     public static func isBundleInstalled() -> Bool {
         FileManager.default.fileExists(atPath: installedIMEURL().path)
             || FileManager.default.fileExists(atPath: systemIMEURL.path)
+            || FileManager.default.fileExists(atPath: legacyInstalledIMEURL.path)
+            || FileManager.default.fileExists(atPath: legacySystemIMEURL.path)
     }
 
     /// 本机存在系统级安装(.pkg 安装器管理;GUI 的安装/换盘只管用户级,避免装出双份 bundle)
     public static var isSystemInstalled: Bool {
         FileManager.default.fileExists(atPath: systemIMEURL.path)
+            || FileManager.default.fileExists(atPath: legacySystemIMEURL.path)
     }
 
     /// 当前状态摘要(供 UI 显示)
     public static func statusSummary() -> String {
         let installed = isBundleInstalled()
-        let registered = isRegistered()
-        let refs = enabledRefCount()
-        if installed && registered && refs == 1 { return "✓ 已安装并启用 — 按 Ctrl+Space 切换后即可打字" }
-        if installed && registered && refs > 1 { return "⚠︎ 已启用但存在 \(refs) 个重复实例 — 点「安装并启用输入法」收敛" }
+        let registeredIDs = registeredModeIDs()
+        if !registeredIDs.isEmpty && registeredIDs.count < modeIDs.count {
+            let registered = InputMethodMode.allCases.filter { registeredIDs.contains($0.sourceID) }.map(\.displayName)
+            let missing = InputMethodMode.allCases.filter { !registeredIDs.contains($0.sourceID) }.map(\.displayName)
+            return "⚠︎ 已收錄 \(registered.joined(separator: "、"))；\(missing.joined(separator: "、")) 尚待收錄，請重新註冊並登出再登入。"
+        }
+        let registered = registeredIDs.count == modeIDs.count
+        let refs = InputMethodMode.allCases.map { enabledRefCount(for: $0) }
+        if installed && registered && refs.allSatisfy({ $0 == 1 }) { return "✓ 已安装并启用 — 按 Ctrl+Space 切换后即可打字" }
+        if installed && registered && refs.contains(where: { $0 > 1 }) { return "⚠︎ 已啟用但存在重複實例，登出再登入可重新整理輸入來源。" }
         if installed && registered { return "已安装未启用 — 点「安装并启用输入法」" }
         if installed { return "已安装,等待 TIS 收录 — 请注销并重新登录一次" }
         if registered { return "输入源已注册,app 未安装 — 点「安装并启用输入法」" }
@@ -110,7 +138,7 @@ public enum IMEInstaller {
     @discardableResult
     public static func register(bundleURL: URL) -> (status: OSStatus, skipped: Bool) {
         if isRegistered() {
-            return (noErr, true) // 已注册,重复调用会产生多余灰色实例
+            return (noErr, true) // 兩個 mode 均已收錄；重複註冊會產生多餘灰色實例
         }
         return (TISRegisterInputSource(bundleURL as CFURL), false)
     }
@@ -131,8 +159,12 @@ public enum IMEInstaller {
         let fm = FileManager.default
         let dest = installedIMEURL()
         do {
+            try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
             try fm.copyItem(at: embeddedIMEURL, to: dest)
+            if fm.fileExists(atPath: legacyInstalledIMEURL.path) {
+                try fm.removeItem(at: legacyInstalledIMEURL)
+            }
             log += "✓ 已拷贝到 ~/Library/Input Methods\n"
         } catch {
             return log + "✗ 拷贝失败: \(error.localizedDescription)\n"
@@ -145,7 +177,13 @@ public enum IMEInstaller {
             if waitUpTo(5) { isRegistered() } {
                 log += "✓ TIS 已可见\n"
             } else {
-                log += "⚠︎ TIS 暂不可见 — 首次安装请注销并重新登录一次(登录扫描收录后,以后无需再注销)\n"
+                let registered = registeredModeIDs()
+                if registered.isEmpty {
+                    log += "⚠︎ TIS 暂不可见 — 首次安装请注销并重新登录一次(登录扫描收录后,以后无需再注销)\n"
+                } else {
+                    let missing = modeIDs.filter { !registered.contains($0) }
+                    log += "⚠︎ TIS 部分收錄：已列出 \(registered.joined(separator: ", "))；尚缺 \(missing.joined(separator: ", "))\n"
+                }
             }
         }
         return log
@@ -163,40 +201,36 @@ public enum IMEInstaller {
         return log
     }
 
-    /// 启用:收敛到单实例 → TIS API → 验证 → defaults 兜底 → 启用列表精确化
+    /// 逐模式補齊啟用狀態並寫入 defaults；更新時保留已啟用模式。
     @discardableResult
     public static func enable() -> (ok: Bool, log: String) {
-        var log = disableAll()
-        guard let src = sourceWithID(modeID) else {
-            let ok = writeEnabledEntries()
-            log += ok ? "✓ defaults 启用写入成功(输入源未注册)\n" : "✗ 输入源未注册,defaults 兜底也失败\n"
-            return (ok, log)
-        }
-        let st = TISEnableInputSource(src)
-        log += "TISEnableInputSource = \(st)\n"
-        let viewOK = waitUpTo(3) { self.enabledRefCount() == 1 }
-        if viewOK {
-            log += "✓ TIS 启用视图:单实例\n"
-        } else {
-            log += "TIS 启用未落盘/存在多实例 → defaults 直写收敛\n"
-        }
-        let ok = writeEnabledEntries()
-        log += ok ? "✓ 启用列表已收敛为 1 条\n" : "✗ defaults 写入失败\n"
-        return (ok, log)
+        ensureEnabled()
     }
 
-    /// 幂等启用(供 .pkg postinstall 等无人值守场景):活视图已有本输入法(≥1 实例)时原样跳过,
-    /// 不触碰 TIS——enable() 的 disableAll 会把正在用的输入源摘掉(部署铁律),升级安装绝不能走;
-    /// 未启用才走 enable()(收敛 + defaults 兜底)
+    /// 幂等啟用(供 .pkg postinstall 等場景):逐一檢查模式，只啟用尚未啟用者。
     public static func ensureEnabled() -> (ok: Bool, log: String) {
-        if enabledRefCount() >= 1 { return (true, "✓ 已启用,跳过(不触碰 TIS 活视图)\n") }
-        return enable()
+        var log = ""
+        for mode in InputMethodMode.allCases where enabledRefCount(for: mode) == 0 {
+            guard let src = sourceWithID(mode.sourceID) else {
+                log += "⚠︎ TIS 尚未列出 \(mode.displayName)(\(mode.sourceID)),先寫入啟用偏好\n"
+                continue
+            }
+            let status = TISEnableInputSource(src)
+            log += "TISEnableInputSource(\(mode.sourceID)) = \(status)\n"
+        }
+        let viewOK = waitUpTo(3) { InputMethodMode.allCases.allSatisfy { self.enabledRefCount(for: $0) >= 1 } }
+        let defaultsOK = writeEnabledEntries()
+        let enabledOK = InputMethodMode.allCases.allSatisfy { enabledRefCount(for: $0) >= 1 }
+        if viewOK { log += "✓ 兩種輸入模式均已啟用\n" }
+        else { log += "啟用偏好已寫入；TIS 活視圖尚未確認兩種模式\n" }
+        log += defaultsOK ? "✓ 已保留現有模式並補齊兩個模式及一條 base 記錄\n" : "✗ defaults 寫入失敗或 TIS 未列出全部模式\n"
+        return (defaultsOK && enabledOK, log)
     }
 
-    /// defaults 直写 com.apple.HIToolbox 启用列表:清掉自家(含遗留 id)全部条目后只写一条 mode
+    /// defaults 直寫 com.apple.HIToolbox 啟用列表:自家項目整理為兩個 mode 加一條 base。
     @discardableResult
     public static func writeEnabledEntries() -> Bool {
-        let allOwnIDs = legacyBundleIDs.union([bundleID])
+        let allOwnIDs = legacyBundleIDs.union([bundleID]).union(modeIDs)
         var existing: [[String: Any]] = []
         if let raw = CFPreferencesCopyAppValue("AppleEnabledInputSources" as CFString, toolboxDomain),
            let list = (raw as? NSArray) as? [[String: Any]] {
@@ -205,25 +239,28 @@ public enum IMEInstaller {
         let others = existing.filter { !allOwnIDs.contains(($0["Bundle ID"] as? String) ?? "") }
         // 与系统输入法(SCIM)一致:base(Keyboard Input Method)+ mode(Input Mode)各一条
         // 编辑器靠 base 渲染标题,mode 才是可切换的输入源;缺 base 会只剩描述没有标题
-        let modeEntry: [String: Any] = [
-            "Bundle ID": bundleID,
-            "Input Mode": modeID,
-            "InputSourceKind": "Input Mode",
-        ]
+        let modeEntries: [[String: Any]] = InputMethodMode.allCases.map { mode in
+            ["Bundle ID": bundleID, "Input Mode": mode.sourceID, "InputSourceKind": "Input Mode"]
+        }
         let baseEntry: [String: Any] = [
             "Bundle ID": bundleID,
             "InputSourceKind": "Keyboard Input Method",
         ]
-        let next = others + [modeEntry, baseEntry]
+        let next = others + modeEntries + [baseEntry]
         CFPreferencesSetAppValue("AppleEnabledInputSources" as CFString, next as CFArray, toolboxDomain)
         CFPreferencesAppSynchronize(toolboxDomain)
-        return enabledRefCount() == 1
+        return InputMethodMode.allCases.allSatisfy { enabledRefCount(for: $0) >= 1 }
     }
 
     @discardableResult
     public static func select() -> (ok: Bool, log: String) {
-        guard let src = sourceWithID(modeID) else {
-            return (false, "✗ TIS 中未找到 \(modeID)\n")
+        select(mode: .pinyin)
+    }
+
+    @discardableResult
+    public static func select(mode: InputMethodMode) -> (ok: Bool, log: String) {
+        guard let src = sourceWithID(mode.sourceID) else {
+            return (false, "✗ TIS 中未找到 \(mode.sourceID)\n")
         }
         let st = TISSelectInputSource(src)
         return (st == noErr, "TISSelectInputSource = \(st)\(st == noErr ? "(成功)" : "(失败,用菜单栏或 Ctrl+Space 切换即可)")\n")
@@ -255,7 +292,7 @@ public enum IMEInstaller {
     public static func postLoginFinish() -> (ok: Bool, log: String) {
         var log = ""
         log += waitUpTo(10, interval: 0.5) { self.isRegistered() }
-            ? "✓ 登录扫描已收录 \(modeID)\n"
+            ? "✓ 登入掃描已收錄 \(modeIDs.joined(separator: ", "))\n"
             : "✗ 等待 10s 仍未收录 — 确认 bundle 在位后,点「安装并启用输入法」再注销一次\n"
         let e = enable()
         log += e.log
@@ -273,7 +310,7 @@ public enum IMEInstaller {
         var log = disableAll()
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).forEach { $0.terminate() }
         let fm = FileManager.default
-        for path in [installedIMEURL().path, "/Library/Input Methods/\(imeAppName)"] {
+        for path in [installedIMEURL().path, systemIMEURL.path, legacyInstalledIMEURL.path, legacySystemIMEURL.path] {
             if fm.fileExists(atPath: path) {
                 do { try fm.removeItem(atPath: path); log += "✓ 已删除 \(path)\n" }
                 catch { log += "✗ 删除 \(path) 失败(系统目录需要 sudo)\n" }
@@ -285,7 +322,7 @@ public enum IMEInstaller {
     }
 
     static func cleanDefaults() {
-        let allIDs = legacyBundleIDs.union([bundleID])
+        let allIDs = legacyBundleIDs.union([bundleID]).union(modeIDs)
         for key in ["AppleEnabledInputSources", "AppleSelectedInputSources", "AppleInputSourceHistory"] as [CFString] {
             guard let raw = CFPreferencesCopyAppValue(key, toolboxDomain),
                   let list = (raw as? NSArray) as? [[String: Any]] else { continue }

@@ -1,5 +1,6 @@
 import AppKit
 import InputMethodKit
+import Carbon
 import IMECore
 
 @objc(InputController)
@@ -17,7 +18,30 @@ final class InputController: IMKInputController {
         return CandidateEngine(store: store)
     }()
 
+    static let quickEngine: QuickEngine? = {
+        let path = Bundle.main.path(forResource: "quick", ofType: "json") ?? "Data/quick.json"
+        do {
+            let dictionary = try QuickDictionary(url: URL(fileURLWithPath: path))
+            DebugLog.log("速成字典已載入：\(path)")
+            return QuickEngine(dictionary: dictionary)
+        } catch {
+            DebugLog.error("速成字典載入失敗：\(error)")
+            return nil
+        }
+    }()
+
     static let perPage = 8
+    private var inputMode: InputMethodMode = .pinyin
+    private lazy var quickSession: QuickSession? = Self.quickEngine.map {
+        QuickSession(engine: $0, fullCharset: QuickPrefs.fullCharsetEnabled, learning: QuickPrefs.learningEnabled)
+    }
+    private var quickTask: Task<Void, Never>?
+    private var quickScheduledGeneration: UInt64?
+    private var quickActive = false
+
+    private var hasQuickInteraction: Bool {
+        inputMode == .quick && (!(quickSession?.code.isEmpty ?? true) || (quickSession?.isAssociation ?? false))
+    }
 
     // MARK: - 中英模式(系统级 ShiftTap 轻点切换,UserDefaults 跨重启记忆)
 
@@ -50,6 +74,9 @@ final class InputController: IMKInputController {
     /// ShiftModeMonitor(主线程)调用:组词中的实例先上屏拼音原文(↩ 行为,非空格选词),再切模式
     static func shiftTappedToggle() {
         for c in liveControllers.allObjects {
+            if c.inputMode == .quick {
+                c.finishQuickComposition(c.client())
+            }
             if !c.raw.isEmpty {
                 DebugLog.log("Shift 切换 → 先上屏拼音原文 '\(c.raw)'")
                 c.flush(c.raw, client: c.client())
@@ -146,6 +173,8 @@ final class InputController: IMKInputController {
     override func activateServer(_ sender: Any!) {
         DebugLog.log("activateServer")
         Self.lastActive = self
+        refreshInputMode(sender)
+        quickActive = inputMode == .quick
         ShiftModeMonitor.retryIfNeeded() // 权限补授后无需重启,焦点切换时重试创建监听
         restoreSuspendedComposition(sender) // 翻译面板关闭还焦点后,原样恢复挂起中的组词
     }
@@ -157,6 +186,8 @@ final class InputController: IMKInputController {
         return Int(events.rawValue)
     }
     override func deactivateServer(_ sender: Any!) {
+        quickActive = false
+        quickTask?.cancel()
         if compositionSuspended {
             // 翻译面板抢焦点所致:组词挂起中,不提交不上屏(状态留在内存,activateServer 恢复)
             DebugLog.log("deactivateServer(组词挂起中,不提交) raw='\(raw)'")
@@ -168,13 +199,14 @@ final class InputController: IMKInputController {
     override func hidePalettes() {
         DebugLog.log("hidePalettes")
         candidateWindow.hide()
+        quickTask?.cancel()
     }
 
     // MARK: - 输入法菜单(菜单栏输入菜单里的「设置…」入口)
 
     /// IMK 输入法子菜单:AFM拼音 激活时点菜单栏拼字图标可见
     override func menu() -> NSMenu! {
-        let m = NSMenu(title: "AFM拼音")
+        let m = NSMenu(title: inputMode.displayName)
         m.addItem(NSMenuItem(title: "设置…", action: #selector(openSettings(_:)), keyEquivalent: ""))
         return m
     }
@@ -194,7 +226,8 @@ final class InputController: IMKInputController {
     // MARK: - 按键处理
 
     override func handle(_ event: NSEvent!, client: Any!) -> Bool {
-        guard Self.engine != nil else {
+        refreshInputMode(client)
+        guard inputMode == .quick ? Self.quickEngine != nil : Self.engine != nil else {
             DebugLog.error("handle 被调用但引擎未加载,全部放行")
             return false
         }
@@ -257,7 +290,7 @@ final class InputController: IMKInputController {
             return true
         }
         // 剪贴板面板键控(免激活模式客户端仍持焦点,键盘在此路由;组词中按键仍归组词,面板用点击)
-        if CompanionPanels.clipboard.isVisible, raw.isEmpty,
+        if CompanionPanels.clipboard.isVisible, raw.isEmpty, !hasQuickInteraction,
            CompanionPanels.clipboard.routeKey(event) {
             return true
         }
@@ -282,6 +315,11 @@ final class InputController: IMKInputController {
         if Self.englishMode { // 英文模式:全部直通——无组词无候选框,标点半角由应用自然插入
             DebugLog.log("英文模式放行 '\(chars)'")
             return false
+        }
+
+        if inputMode == .quick {
+            quickActive = true
+            return handleQuick(event, chars: chars, effective: eff, modifiers: mods, client: client)
         }
 
         switch true {
@@ -404,6 +442,198 @@ final class InputController: IMKInputController {
         }
     }
 
+
+    // MARK: - 速成
+
+    override func setValue(_ value: Any!, forTag tag: Int, client sender: Any!) {
+        super.setValue(value, forTag: tag, client: sender)
+        if tag == Int(kTextServiceInputModePropertyTag), let id = value as? String,
+           let mode = InputMethodMode.from(sourceID: id) {
+            switchInputMode(to: mode, client: sender)
+        }
+    }
+
+    private func refreshInputMode(_ sender: Any!) {
+        if let id = super.value(forTag: Int(kTextServiceInputModePropertyTag), client: sender) as? String,
+           let mode = InputMethodMode.from(sourceID: id) {
+            switchInputMode(to: mode, client: sender)
+            return
+        }
+        guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else { return }
+        for property in [kTISPropertyInputModeID, kTISPropertyInputSourceID] {
+            if let mode = InputMethodMode.from(sourceID: IMEInstaller.strProp(current, property!)) {
+                switchInputMode(to: mode, client: sender)
+                return
+            }
+        }
+    }
+
+    private func switchInputMode(to mode: InputMethodMode, client: Any!) {
+        guard mode != inputMode else { return }
+        if inputMode == .quick { finishQuickComposition(client) }
+        else if !raw.isEmpty { flush(firstChoiceText, client: client) }
+        quickTask?.cancel()
+        quickScheduledGeneration = nil
+        fmGeneration &+= 1
+        candidateWindow.hide()
+        inputMode = mode
+        quickActive = mode == .quick
+        DebugLog.log("輸入來源切換：\(mode.displayName)")
+    }
+
+    private func handleQuick(_ event: NSEvent, chars: String, effective: String,
+                             modifiers: NSEvent.ModifierFlags, client: Any!) -> Bool {
+        guard client is IMKTextInput, let session = quickSession else { return false }
+        session.updateOptions(fullCharset: QuickPrefs.fullCharsetEnabled, learning: QuickPrefs.learningEnabled)
+        let shifted = modifiers.contains(.shift)
+        let key: QuickKey?
+        switch event.keyCode {
+        case 49: key = .space
+        case 36, 76: key = .enter
+        case 51: key = .backspace
+        case 53: key = .escape
+        case 116: key = .previousPage
+        case 121: key = .nextPage
+        case 126: key = .previousCandidate
+        case 125: key = .nextCandidate
+        case 123: key = session.expanded ? .previousPage : .previousCandidate
+        case 124: key = session.expanded ? .nextPage : .nextCandidate
+        case 48: key = .expand
+        default:
+            if let c = chars.lowercased().first, ("a"..."z").contains(c), !shifted,
+               !modifiers.contains(.capsLock) { key = .letter(c) }
+            else if let n = QuickKey.digitValue(keyCode: event.keyCode, characters: chars, shifted: shifted) {
+                key = .digit(n, shifted: shifted)
+            }
+            else { key = nil }
+        }
+        if let key {
+            let result = session.handle(key)
+            applyQuickResult(result, client: client)
+            if result.consumed { scheduleQuickRerank(client); return true }
+        }
+        if !session.code.isEmpty || session.isAssociation { finishQuickComposition(client) }
+        if !shifted, let n = Int(chars), (0...9).contains(n), UserPrefs.fullWidthPunct,
+           let scalar = UnicodeScalar(0xFF10 + n), let input = client as? IMKTextInput {
+            input.insertText(NSAttributedString(string: String(scalar)),
+                             replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            return true
+        }
+        return handlePunctuation(effective, composing: false, client: client)
+    }
+
+    private func applyQuickResult(_ result: QuickResult, client: Any!) {
+        guard let input = client as? IMKTextInput else { return }
+        for text in result.commits {
+            input.insertText(NSAttributedString(string: text),
+                             replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            DebugLog.log("速成提交：\(text)")
+        }
+        renderQuick(client)
+    }
+
+    private func renderQuick(_ client: Any!) {
+        guard let session = quickSession, let input = client as? IMKTextInput else { return }
+        let marked = NSMutableAttributedString(string: session.markedText)
+        if marked.length > 0 {
+            marked.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue,
+                                range: NSRange(location: 0, length: marked.length))
+        }
+        input.setMarkedText(marked, selectionRange: NSRange(location: marked.length, length: 0),
+                            replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        guard session.isCandidateWindowVisible, !session.candidates.isEmpty else {
+            candidateWindow.hide()
+            return
+        }
+        let items = session.candidates.enumerated().map {
+            CandidateItem(index: $0.offset, text: $0.element, isAI: $0.element == session.aiRecommendation)
+        }
+        let generation = session.generation
+        let caret = Self.caretRect(client)
+        Self.latestCaret = caret
+        candidateWindow.showQuick(
+            items: items, selectedIndex: session.selectedIndex, pageStart: session.pageStart,
+            expanded: session.expanded, association: session.isAssociation, caretRect: caret,
+            onSelect: { [weak self] index in
+                DispatchQueue.main.async {
+                    guard let self, self.inputMode == .quick, self.quickActive,
+                          let session = self.quickSession, session.generation == generation else { return }
+                    guard let text = items.first(where: { $0.index == index })?.text else { return }
+                    session.updateOptions(fullCharset: QuickPrefs.fullCharsetEnabled, learning: QuickPrefs.learningEnabled)
+                    guard let currentIndex = session.candidates.firstIndex(of: text) else {
+                        self.renderQuick(self.client())
+                        return
+                    }
+                    self.applyQuickResult(session.select(index: currentIndex), client: self.client())
+                }
+            },
+            onPreviousPage: { [weak self] in self?.quickWindowAction(.previousPage, generation: generation) },
+            onNextPage: { [weak self] in self?.quickWindowAction(.nextPage, generation: generation) },
+            onToggleExpand: { [weak self] in self?.quickWindowAction(.expand, generation: generation) })
+        DebugLog.log("速成候選：碼=\(session.code) 聯想=\(session.isAssociation) 頁=\(session.pageStart / 9 + 1) n=\(items.count)")
+    }
+
+    private func quickWindowAction(_ key: QuickKey, generation: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.inputMode == .quick, self.quickActive,
+                  let session = self.quickSession, session.generation == generation else { return }
+            session.updateOptions(fullCharset: QuickPrefs.fullCharsetEnabled, learning: QuickPrefs.learningEnabled)
+            self.applyQuickResult(session.handle(key), client: self.client())
+        }
+    }
+
+    private func finishQuickComposition(_ client: Any!) {
+        quickTask?.cancel()
+        quickScheduledGeneration = nil
+        quickSession?.updateOptions(fullCharset: QuickPrefs.fullCharsetEnabled, learning: QuickPrefs.learningEnabled)
+        if let text = quickSession?.finishComposition(), let input = client as? IMKTextInput {
+            input.insertText(NSAttributedString(string: text),
+                             replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+            DebugLog.log("速成結束組字：\(text)")
+        }
+        if let input = client as? IMKTextInput {
+            input.setMarkedText(NSAttributedString(), selectionRange: NSRange(location: 0, length: 0),
+                                replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
+        }
+        candidateWindow.hide()
+    }
+
+    private func scheduleQuickRerank(_ client: Any!) {
+        guard QuickPrefs.aiEnabled, quickActive, let session = quickSession,
+              session.isCandidateWindowVisible, !session.isAssociation,
+              !session.orderLocked, session.candidates.count > 1 else { return }
+        let generation = session.generation
+        guard quickScheduledGeneration != generation else { return }
+        quickScheduledGeneration = generation
+        quickTask?.cancel()
+        let code = session.code
+        let texts = Array(session.candidates.prefix(9))
+        let context = Self.contextBeforeCaret(client)
+        let cloud = QuickPrefs.cloudEnabled
+        quickTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 400_000_000) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            let current = await MainActor.run {
+                self.inputMode == .quick && self.quickActive && QuickPrefs.aiEnabled
+                    && self.quickSession?.generation == generation
+                    && self.quickSession?.orderLocked == false
+                    && QuickPrefs.cloudEnabled == cloud
+            }
+            guard current else { return }
+            guard let index = await FMReranker.shared.rerankQuick(
+                context: context, code: code, candidates: texts, allowCloud: cloud),
+                texts.indices.contains(index), !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self.inputMode == .quick, self.quickActive, QuickPrefs.aiEnabled,
+                      QuickPrefs.cloudEnabled == cloud,
+                      self.quickSession?.applyRecommendation(texts[index], generation: generation) == true else { return }
+                DebugLog.log("速成AI推薦：\(texts[index])，保留第一候選")
+                self.renderQuick(self.client())
+            }
+        }
+    }
+
+
     // MARK: - 中文全角标点(英文模式不会走到这里)
 
     static let fullWidthPunct: [String: String] = [
@@ -463,14 +693,17 @@ final class InputController: IMKInputController {
     // MARK: - 组词状态
 
     override func composedString(_ sender: Any!) -> Any! {
-        NSAttributedString(string: committedBuffer + raw)
+        if inputMode == .quick { return NSAttributedString(string: quickSession?.markedText ?? "") }
+        return NSAttributedString(string: committedBuffer + raw)
     }
 
     override func originalString(_ sender: Any!) -> NSAttributedString! {
-        NSAttributedString(string: committedBuffer + raw)
+        if inputMode == .quick { return NSAttributedString(string: quickSession?.code ?? "") }
+        return NSAttributedString(string: committedBuffer + raw)
     }
 
     override func commitComposition(_ sender: Any!) {
+        if inputMode == .quick { finishQuickComposition(sender); return }
         DebugLog.log("commitComposition raw='\(raw)' 首选=\(candidates.first?.text ?? "无")")
         guard !raw.isEmpty else { return }
         flush(firstChoiceText, client: sender)
@@ -602,6 +835,7 @@ final class InputController: IMKInputController {
             DebugLog.error("insertFromPanel: 无活跃 client")
             return
         }
+        if c.inputMode == .quick { c.finishQuickComposition(client) }
         if !c.raw.isEmpty {
             DebugLog.log("面板插入前先上屏首选 '\(c.firstChoiceText)'")
             c.flush(c.firstChoiceText, client: client)

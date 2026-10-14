@@ -32,8 +32,9 @@ public final class FMReranker {
 
     /// 统一出入口:云端启用且配置完整 → 云端(Provider 协议);失败/未启用/配置不全 → 端侧 FM;
     /// 都失败 → nil。label 仅用于日志区分(重排/整句/翻译)。
-    private func respond(label: String, instructions: String, prompt: String) async -> String? {
-        if ModelPrefs.cloudEnabled, let cfg = CloudProviderModel.configured() {
+    private func respond(label: String, instructions: String, prompt: String,
+                         cloudOverride: Bool? = nil) async -> String? {
+        if cloudOverride ?? ModelPrefs.cloudEnabled, let cfg = CloudProviderModel.configured() {
             let t0 = Date()
             do {
                 let session = LanguageModelSession(model: CloudProviderModel(config: cfg),
@@ -87,6 +88,18 @@ public final class FMReranker {
         let idx = Self.firstIndex(in: out, upperBound: candidates.count)
         DebugLog.log("FM 解析: idx=\(idx.map(String.init) ?? "nil")")
         return idx
+    }
+
+    /// 速成的雲端授權獨立於拼音；只能推薦已有候選，不生成替代字。
+    public func rerankQuick(context: String, code: String, candidates: [String],
+                            allowCloud: Bool) async -> Int? {
+        guard candidates.count > 1 else { return nil }
+        let instructions = "你是香港繁體速成輸入法的候選推薦引擎。根據上文、速成碼和候選列表，選出最符合語境的一項。只能選列表內已有候選。只輸出序號數字，不要解釋。"
+        let numbered = candidates.enumerated().map { "\($0.offset + 1).\($0.element)" }.joined(separator: " ")
+        let prompt = "上文：\(context.isEmpty ? "（句首）" : context)\n速成碼：\(code)\n候選：\(numbered)"
+        guard let response = await respond(label: "速成推薦", instructions: instructions,
+                                           prompt: prompt, cloudOverride: allowCloud) else { return nil }
+        return Self.firstIndex(in: response, upperBound: candidates.count)
     }
 
     /// FM 整句预测:长拼音词典覆盖不住时,直接让模型出句子

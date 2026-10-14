@@ -73,6 +73,10 @@ final class AppModel: ObservableObject {
     @Published var fullWidthPunct: Bool { didSet { write("AFMFullWidthPunct", fullWidthPunct) } }
     @Published var fmEnhance: Bool { didSet { write("AFMFMEnhance", fmEnhance) } }
     @Published var userFreqEnabled: Bool { didSet { write("AFMUserFreqEnabled", userFreqEnabled) } }
+    @Published var quickFullCharset: Bool { didSet { write(QuickPrefs.fullCharsetKey, quickFullCharset) } }
+    @Published var quickLearning: Bool { didSet { write(QuickPrefs.learningKey, quickLearning) } }
+    @Published var quickAI: Bool { didSet { write(QuickPrefs.aiKey, quickAI) } }
+    @Published var quickCloud: Bool { didSet { write(QuickPrefs.cloudKey, quickCloud) } }
     @Published var fontSize: Double { didSet { write("AFMCandidateFontSize", Int(fontSize)) } }
     // 测试:固定透镜拖拽(droplet-relative-motion 支线移植)——键名与 UserPrefs.dropletFixedLens 逐字一致
     @Published var dropletFixedLens: Bool { didSet { write("AFMDropletFixedLens", dropletFixedLens) } }
@@ -213,6 +217,10 @@ final class AppModel: ObservableObject {
         fullWidthPunct = d.object(forKey: "AFMFullWidthPunct") as? Bool ?? true
         fmEnhance = d.object(forKey: "AFMFMEnhance") as? Bool ?? true
         userFreqEnabled = d.object(forKey: "AFMUserFreqEnabled") as? Bool ?? true
+        quickFullCharset = d.bool(forKey: QuickPrefs.fullCharsetKey)
+        quickLearning = d.bool(forKey: QuickPrefs.learningKey)
+        quickAI = d.bool(forKey: QuickPrefs.aiKey)
+        quickCloud = d.bool(forKey: QuickPrefs.cloudKey)
         fontSize = Double(d.object(forKey: "AFMCandidateFontSize") as? Int ?? 16)
         dropletFixedLens = d.object(forKey: "AFMDropletFixedLens") as? Bool ?? false
         cloudEnabled = d.object(forKey: ModelPrefs.cloudEnabledKey) as? Bool ?? false
@@ -240,7 +248,11 @@ final class AppModel: ObservableObject {
     }
     private func write(_ key: String, _ value: String) {
         Self.imeDefaults.set(value, forKey: key)
-        NSLog("[AFMApp] 设置 \(key) = \(value.prefix(60))")
+        if key == ModelPrefs.cloudAPIKeyKey {
+            NSLog("[AFMApp] 雲端憑證已更新")
+        } else {
+            NSLog("[AFMApp] 设置 \(key) = \(value.prefix(60))")
+        }
     }
 
     // MARK: 快捷键(kb35)
@@ -632,7 +644,7 @@ struct InstallView: View {
                         Button("一键注销(仅首次安装需要)") { model.logout() }
                         Button("卸载", role: .destructive) { model.confirmUninstall = true }
                     }
-                    .confirmationDialog("卸载 AFM拼音 输入法?", isPresented: $model.confirmUninstall, titleVisibility: .visible) {
+                    .confirmationDialog("卸載 AFM輸入法？", isPresented: $model.confirmUninstall, titleVisibility: .visible) {
                         Button("卸载", role: .destructive) { model.uninstall() }
                     } message: {
                         Text("停用并删除 ~/Library/Input Methods 中的输入法 bundle 与启用条目。")
@@ -813,7 +825,7 @@ struct ModelView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 GlassCard(title: "云端模型(启用后替代端侧 FM,失败自动回落)") {
-                    Toggle("启用云端模型", isOn: $model.cloudEnabled)
+                    Toggle("拼音使用雲端模型", isOn: $model.cloudEnabled)
                     Picker("提供商", selection: $model.cloudProvider) {
                         ForEach(AppModel.cloudPresets, id: \.id) { p in
                             Text(p.name).tag(p.id)
@@ -902,12 +914,25 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "引擎") {
+                GlassCard(title: "拼音") {
                     Toggle("模糊拼音", isOn: $model.fuzzy)
                     Toggle("全角标点", isOn: $model.fullWidthPunct)
                     Toggle("FM 增强(端侧模型重排 + 整句预测)", isOn: $model.fmEnhance)
                     Toggle("记住打过的词(用户词库 + 词频加成)", isOn: $model.userFreqEnabled)
                     Text("改动即时生效,输入法每次按键现读;开关状态写入 moe.bemly.inputmethod.AfmIME 域")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                GlassCard(title: "繁體速成") {
+                    Text("預設沿用 Windows 候選次序，每頁 9 字；空格翻頁、Enter 選字，Shift＋數字選聯想。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Toggle("完整字集（加入擴展字及其他碼字映射）", isOn: $model.quickFullCharset)
+                    Toggle("記住速成選字（只影響速成排序）", isOn: $model.quickLearning)
+                    Toggle("AI 候選推薦（保留第一候選）", isOn: $model.quickAI)
+                    Text("AI 推薦放在第二位並標記 ✦；開始移動選項或翻頁後，當次候選次序會鎖定。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("速成使用雲端 AI", isOn: $model.quickCloud)
+                        .disabled(!model.quickAI)
+                    Text("預設使用本機模型。雲端沿用「模型」頁的連線設定；開啟後會傳送速成碼、候選及光標前的部分文字。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 GlassCard(title: "外观") {
@@ -964,7 +989,7 @@ struct SettingsView: View {
 @main
 struct AFMControlCenter: App {
     var body: some Scene {
-        WindowGroup("AFM拼音") {
+        WindowGroup("AFM輸入法") {
             RootView(model: AppModel.shared)
                 .onAppear {
                     if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
