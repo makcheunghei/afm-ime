@@ -13,19 +13,36 @@ cd "$(dirname "$0")/.."
   echo "缺少已打包的速成词库；请先运行 scripts/package.sh" >&2
   exit 1
 }
+python3 - <<'PY'
+from pathlib import Path
+import stat
+app = Path('build/AFM輸入法.app')
+for path in [app, *app.rglob('*')]:
+    mode = path.stat().st_mode
+    if not mode & stat.S_IROTH or path.is_dir() and not mode & stat.S_IXOTH:
+        raise SystemExit(f'封包含一般使用者不可存取的檔案：{path}；請重新執行 scripts/package.sh')
+for relative in ('Contents/MacOS/AFMInput', 'Contents/PlugIns/AFMSettings.app/Contents/MacOS/AFMSettings'):
+    if not (app / relative).stat().st_mode & stat.S_IXOTH:
+        raise SystemExit(f'封包程式沒有一般使用者執行權限：{relative}')
+PY
 
 VERSION=$(plutil -extract CFBundleShortVersionString raw "build/AFM輸入法.app/Contents/Info.plist")
 IDENT="moe.bemly.inputmethod.AfmIME.pkg"
-COMPONENT="build/AFM輸入法-component.pkg"
 OUT="build/AFM輸入法-$VERSION.pkg"
 
-STAGE="build/pkgroot/Library/Input Methods"
-rm -rf build/pkgroot build/pkgscripts
-rm -f "$COMPONENT" "$OUT"
-mkdir -p "$STAGE" build/pkgscripts
+PACKAGE_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/afm-package.XXXXXX")
+PACKAGE_TEMP_NOINDEX="$PACKAGE_TEMP.noindex"
+mv "$PACKAGE_TEMP" "$PACKAGE_TEMP_NOINDEX"
+trap 'rm -rf "$PACKAGE_TEMP_NOINDEX"' EXIT
+PACKAGE_ROOT="$PACKAGE_TEMP_NOINDEX/pkgroot"
+PACKAGE_SCRIPTS="$PACKAGE_TEMP_NOINDEX/pkgscripts"
+COMPONENT="$PACKAGE_TEMP_NOINDEX/AFM輸入法-component.pkg"
+STAGE="$PACKAGE_ROOT/Library/Input Methods"
+rm -f "$OUT"
+mkdir -p "$STAGE" "$PACKAGE_SCRIPTS"
 cp -R "build/AFM輸入法.app" "$STAGE/"
 
-cat > build/pkgscripts/postinstall <<'POST'
+cat > "$PACKAGE_SCRIPTS/postinstall" <<'POST'
 #!/bin/bash
 # AFM輸入法 安裝後腳本(root 執行):TIS 操作以主控台用戶身份執行(TIS 快取/偏好都是 per-user)
 set -u
@@ -52,9 +69,9 @@ asuser "$BIN" --ensure-enabled || true
 echo "AFM輸入法已安裝到 /Library/Input Methods。首次安裝請登出再登入一次完成收錄；之後更新無需登出。"
 exit 0
 POST
-chmod +x build/pkgscripts/postinstall
+chmod +x "$PACKAGE_SCRIPTS/postinstall"
 
-pkgbuild --root build/pkgroot --scripts build/pkgscripts \
+pkgbuild --root "$PACKAGE_ROOT" --scripts "$PACKAGE_SCRIPTS" \
     --identifier "$IDENT" --version "$VERSION" --install-location "/" \
     "$COMPONENT"
 
@@ -75,5 +92,4 @@ else
   echo "!! pkg 未签名(自签证书不被 productsign 接受)——本机可用 sudo installer 安装"
 fi
 
-rm -rf build/pkgroot build/pkgscripts "$COMPONENT"
 echo "打包完成: $OUT (pkg 签名: $([ "$SIGN_ID" != "-" ] && pkgutil --check-signature "$OUT" 2>/dev/null | grep -q "Status: signed" && echo "$SIGN_ID" || echo "无"))"

@@ -8,7 +8,11 @@ if [ -s Data/dict.bin ]; then
 fi
 mkdir -p .build/upstream Data
 PINYIN_PACKAGE=".build/upstream/AFM-Pinyin-2026.09.15.pkg"
-PINYIN_UNPACKED=".build/upstream/unpacked"
+PINYIN_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/afm-dictionary.XXXXXX")
+PINYIN_TEMP_NOINDEX="$PINYIN_TEMP.noindex"
+mv "$PINYIN_TEMP" "$PINYIN_TEMP_NOINDEX"
+trap 'rm -rf "$PINYIN_TEMP_NOINDEX"' EXIT
+PINYIN_UNPACKED="$PINYIN_TEMP_NOINDEX/unpacked"
 if [ ! -f "$PINYIN_PACKAGE" ]; then
   curl --fail --location --retry 2 --output "$PINYIN_PACKAGE" \
     https://github.com/Bemly/afm-ime/releases/download/v2026.09.15/AFM-Pinyin-2026.09.15.pkg
@@ -20,9 +24,8 @@ expected = 'ad9ea7583ae48d39e9d0b590104ea20de18cf6a175620ce190f7a8fc1125c201'
 if hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest() != expected:
     raise SystemExit('上游封包 SHA-256 不符，停止提取')
 PY
-if [ ! -d "$PINYIN_UNPACKED" ]; then
-  pkgutil --expand-full "$PINYIN_PACKAGE" "$PINYIN_UNPACKED"
-fi
+# 上游 App 只存在於不索引的暫存區，提取詞庫後即移除，避免留下可被系統收錄的副本。
+pkgutil --expand-full "$PINYIN_PACKAGE" "$PINYIN_UNPACKED"
 python3 - "$PINYIN_UNPACKED" <<'PY'
 import hashlib, os, shutil, struct, sys
 from pathlib import Path

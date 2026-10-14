@@ -9,7 +9,11 @@ enum Installer {
         let registeredBefore = IMEInstaller.registeredModeIDs()
         let st = IMEInstaller.register(bundleURL: url)
         if st.skipped {
-            print("兩種輸入模式已完整註冊，跳過重複註冊")
+            if IMEInstaller.isRegistered() {
+                print("兩種輸入模式已完整註冊，跳過重複註冊")
+            } else {
+                print("已收錄部分模式或已遞交註冊，跳過重複註冊以免累積副本；等待登入掃描補齊模式。")
+            }
             return 0
         }
         print("TISRegisterInputSource(\(url.path)) = \(st.status)")
@@ -32,6 +36,7 @@ enum Installer {
 
     static func status() -> Int32 {
         print(IMEInstaller.statusSummary())
+        guard !IMEInstaller.allSources().isEmpty else { return 0 }
         for mode in InputMethodMode.allCases {
             let registered = IMEInstaller.sourceWithID(mode.sourceID) != nil
             let enabled = IMEInstaller.enabledRefCount(for: mode)

@@ -123,8 +123,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DebugLog.error("设置中心 helper 缺失: \(url.path)")
             return
         }
-        DebugLog.log("未安装态启动 → 自动打开设置中心")
+        DebugLog.log("開啟設定中心")
         NSWorkspace.shared.open(url)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        DebugLog.log("使用者重開輸入法 App → 開啟設定中心")
+        openSettingsHelper()
+        return false
     }
 }
 

@@ -25,6 +25,7 @@ public enum IMEInstaller {
     public static let imeAppName = "AFM輸入法.app"
     public static let legacyIMEAppName = "AFM拼音.app"
     public static let toolboxDomain = "com.apple.HIToolbox" as CFString
+    private static let registrationRequestKey = "AFMInputSourceRegistrationRequest"
 
     // MARK: - 查询
 
@@ -45,7 +46,8 @@ public enum IMEInstaller {
     }
 
     public static func sourceWithID(_ id: String) -> TISInputSource? {
-        allSources().first { strProp($0, kTISPropertyInputSourceID) == id }
+        enabledSources().first { strProp($0, kTISPropertyInputSourceID) == id }
+            ?? allSources().first { strProp($0, kTISPropertyInputSourceID) == id }
     }
 
     /// 本输入法的全部源实例(含历史遗留 id;可能有重复注册产生的多份)
@@ -117,6 +119,12 @@ public enum IMEInstaller {
     /// 当前状态摘要(供 UI 显示)
     public static func statusSummary() -> String {
         let installed = isBundleInstalled()
+        if let url = installedURLs().first, let issue = installationResourceIssue(at: url) {
+            return "⚠︎ 安裝檔案有問題：\(issue)，請重新安裝修正版。"
+        }
+        if allSources().isEmpty {
+            return "目前無法讀取系統輸入來源；請在已登入及解鎖的桌面重新檢查。"
+        }
         let registeredIDs = registeredModeIDs()
         if !registeredIDs.isEmpty && registeredIDs.count < modeIDs.count {
             let registered = InputMethodMode.allCases.filter { registeredIDs.contains($0.sourceID) }.map(\.displayName)
@@ -125,22 +133,71 @@ public enum IMEInstaller {
         }
         let registered = registeredIDs.count == modeIDs.count
         let refs = InputMethodMode.allCases.map { enabledRefCount(for: $0) }
-        if installed && registered && refs.allSatisfy({ $0 == 1 }) { return "✓ 已安装并启用 — 按 Ctrl+Space 切换后即可打字" }
-        if installed && registered && refs.contains(where: { $0 > 1 }) { return "⚠︎ 已啟用但存在重複實例，登出再登入可重新整理輸入來源。" }
+        if installed && registered && refs.allSatisfy({ $0 >= 1 }) {
+            return "已安裝並儲存兩種模式的啟用設定；首次安裝若選單未顯示，請登出再登入。"
+        }
         if installed && registered { return "已安装未启用 — 点「安装并启用输入法」" }
         if installed { return "已安装,等待 TIS 收录 — 请注销并重新登录一次" }
         if registered { return "输入源已注册,app 未安装 — 点「安装并启用输入法」" }
         return "未安装 — 点「安装并启用输入法」"
     }
 
+    /// 註冊標記不代表安裝檔案可用；尤其系統級 App 的資源可能屬於 root。
+    static func installationResourceIssue(at url: URL) -> String? {
+        let requirements: [(String, String, Bool)] = [
+            ("Contents/MacOS/AFMInput", "輸入法引擎", true),
+            ("Contents/Resources/dict.bin", "拼音詞庫", false),
+            ("Contents/Resources/quick.json", "速成詞庫", false),
+            ("Contents/PlugIns/AFMSettings.app/Contents/MacOS/AFMSettings", "設定中心", true),
+        ]
+        let fm = FileManager.default
+        for (relative, label, executable) in requirements {
+            let path = url.appendingPathComponent(relative).path
+            var directory = ObjCBool(false)
+            guard fm.fileExists(atPath: path, isDirectory: &directory), !directory.boolValue else {
+                DebugLog.log("安裝檔案缺失：\(path)")
+                return "缺少\(label)"
+            }
+            let permissions = (try? fm.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue ?? 0
+            guard permissions & 0o444 != 0, fm.isReadableFile(atPath: path),
+                  !executable || fm.isExecutableFile(atPath: path) else {
+                DebugLog.log("安裝檔案權限錯誤：\(path)")
+                return "\(label)無法讀取或執行"
+            }
+        }
+        return nil
+    }
+
     // MARK: - 动作
 
     @discardableResult
     public static func register(bundleURL: URL) -> (status: OSStatus, skipped: Bool) {
-        if isRegistered() {
-            return (noErr, true) // 兩個 mode 均已收錄；重複註冊會產生多餘灰色實例
+        // 升級新增模式時可能只看見舊拼音；重複註冊整個 bundle 會累積拼音副本。
+        // TIS 活視圖亦可能延遲，成功遞交的同一路徑及模式組合只遞交一次。
+        let target = installedURLs().first ?? bundleURL
+        let request = target.standardizedFileURL.path + "|" + modeIDs.joined(separator: "|")
+        let domain = bundleID as CFString
+        let previousRequest = CFPreferencesCopyAppValue(registrationRequestKey as CFString, domain) as? String
+        let sourceIDs = Set(allSources().map { strProp($0, kTISPropertyInputSourceID) })
+        guard !sourceIDs.isEmpty else {
+            DebugLog.log("無法讀取系統輸入來源，暫停註冊以免誤判為首次安裝")
+            return (OSStatus(paramErr), false)
         }
-        return (TISRegisterInputSource(bundleURL as CFURL), false)
+        guard registrationIsNeeded(sourceIDs: sourceIDs, requestAlreadySubmitted: previousRequest == request) else {
+            DebugLog.log("略過重複註冊；已收錄或已遞交：\(target.path)")
+            return (noErr, true)
+        }
+        let status = TISRegisterInputSource(target as CFURL)
+        if status == noErr {
+            CFPreferencesSetAppValue(registrationRequestKey as CFString, request as CFString, domain)
+            CFPreferencesAppSynchronize(domain)
+        }
+        DebugLog.log("遞交輸入源註冊：\(target.path)，status=\(status)")
+        return (status, false)
+    }
+
+    static func registrationIsNeeded(sourceIDs: Set<String>, requestAlreadySubmitted: Bool) -> Bool {
+        !requestAlreadySubmitted && sourceIDs.isDisjoint(with: Set(modeIDs + [bundleID]))
     }
 
     /// 等待条件成立(TIS 状态异步传播,立即查询会误报)
@@ -209,6 +266,10 @@ public enum IMEInstaller {
 
     /// 幂等啟用(供 .pkg postinstall 等場景):逐一檢查模式，只啟用尚未啟用者。
     public static func ensureEnabled() -> (ok: Bool, log: String) {
+        guard !allSources().isEmpty else {
+            DebugLog.log("無法讀取系統輸入來源，保留啟用偏好")
+            return (false, "目前無法讀取系統輸入來源，未修改啟用設定；請在已登入及解鎖的桌面重試。\n")
+        }
         var log = ""
         for mode in InputMethodMode.allCases where enabledRefCount(for: mode) == 0 {
             guard let src = sourceWithID(mode.sourceID) else {
@@ -235,6 +296,16 @@ public enum IMEInstaller {
         if let raw = CFPreferencesCopyAppValue("AppleEnabledInputSources" as CFString, toolboxDomain),
            let list = (raw as? NSArray) as? [[String: Any]] {
             existing = list
+        }
+        // 登入期間新增的輸入法可能已在活視圖中，尚未出現在偏好快照；保留正在使用的來源。
+        if let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+           strProp(current, kTISPropertyInputSourceType) == (kTISTypeKeyboardInputMethodWithoutModes as String) {
+            let currentBundle = strProp(current, kTISPropertyBundleID)
+            if !currentBundle.isEmpty, !allOwnIDs.contains(currentBundle),
+               !existing.contains(where: { ($0["Bundle ID"] as? String) == currentBundle }) {
+                existing.append(["Bundle ID": currentBundle, "InputSourceKind": "Keyboard Input Method"])
+                DebugLog.log("保留現行輸入法：\(currentBundle)")
+            }
         }
         let others = existing.filter { !allOwnIDs.contains(($0["Bundle ID"] as? String) ?? "") }
         // 与系统输入法(SCIM)一致:base(Keyboard Input Method)+ mode(Input Mode)各一条
@@ -263,7 +334,7 @@ public enum IMEInstaller {
             return (false, "✗ TIS 中未找到 \(mode.sourceID)\n")
         }
         let st = TISSelectInputSource(src)
-        return (st == noErr, "TISSelectInputSource = \(st)\(st == noErr ? "(成功)" : "(失败,用菜单栏或 Ctrl+Space 切换即可)")\n")
+        return (st == noErr, "TISSelectInputSource = \(st)\(st == noErr ? "（成功）" : "（系統拒絕切換；首次安裝請登出再登入後重試）")\n")
     }
 
     /// 一键注销:优先 loginwindow 免确认 AppleEvent,失败走 System Events(弹系统确认框)
@@ -322,6 +393,8 @@ public enum IMEInstaller {
     }
 
     static func cleanDefaults() {
+        CFPreferencesSetAppValue(registrationRequestKey as CFString, nil, bundleID as CFString)
+        CFPreferencesAppSynchronize(bundleID as CFString)
         let allIDs = legacyBundleIDs.union([bundleID]).union(modeIDs)
         for key in ["AppleEnabledInputSources", "AppleSelectedInputSources", "AppleInputSourceHistory"] as [CFString] {
             guard let raw = CFPreferencesCopyAppValue(key, toolboxDomain),

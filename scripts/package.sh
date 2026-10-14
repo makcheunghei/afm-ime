@@ -116,7 +116,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINDIR/afm-input" "$APP/Contents/MacOS/AFMInput"
 cp Data/dict.bin "$APP/Contents/Resources/dict.bin"
 cp Data/builtin-user-words.json "$APP/Contents/Resources/builtin-user-words.json"  # 内置用户词种子(UserFreq 首启补种,kb40)
-cp Data/quick.json "$APP/Contents/Resources/quick.json"
+# 原始資料由 mkstemp 生成時是 600；App 裝到系統目錄後，所有使用者都必須能讀取詞庫。
+install -m 644 Data/quick.json "$APP/Contents/Resources/quick.json"
 [ -n "$METALLIB" ] && cp "$METALLIB" "$APP/Contents/Resources/default.metallib"
 [ -n "$TISICON" ] && cp "$TISICON" "$APP/Contents/Resources/icon.tiff"
 [ -n "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
@@ -240,6 +241,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+# 系統級安裝後檔案會屬於 root；靜態 App 資源須可供一般使用者讀取，目錄及程式須可執行。
+chmod -R a+rX "$APP"
 codesign --force --sign "$SIGN_ID" "$HELPER"
 
 codesign --force --sign "$SIGN_ID" "$APP"
