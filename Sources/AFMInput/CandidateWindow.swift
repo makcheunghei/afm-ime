@@ -930,6 +930,7 @@ final class CandidateWindowController {
                        max(visible.minY + 4, visible.maxY - size.height - 4))
         panel.setFrameOrigin(origin)
         panel.orderFront(nil)
+        onFrameChange?(panel.frame)
         DebugLog.log("quick layout panel=\(NSStringFromRect(panel.frame)) glass=\(NSStringFromRect(glass.frame)) caret=\(NSStringFromRect(caretRect)) screen=\(screen?.localizedName ?? "?") 候選=\(items.count) 起點=\(pageStart) 展開=\(expanded) 聯想=\(association)")
     }
 
