@@ -82,13 +82,8 @@ else
   echo "!! 未找到 Xcode(DEVELOPER_DIR 未设且 /Applications 无 Xcode*.app)——跳过 Metal shader,水滴将无折射"
 fi
 
-# 图标(单一来源 Data/logo.png,1254² 液态玻璃「拼」设计稿):
-#   AppIcon.icns — iconset 多尺寸 → 引擎+helper 双包 CFBundleIconFile(Finder/Launchpad/Dock 生效)
-#   icon.tiff    — 16pt 多表示(16px 72dpi + 32px 144dpi,tiffutil 合页)→ 引擎 Resources,
-#                  Info.plist tsInputMethodIconFileKey / tsInputMode*IconFileKey 四键引用 =
-#                  系统设置输入法列表 + 输入菜单图标
-# 坑①:sips 转 PNG 必须显式 -s format png,否则输出仍是 TIFF 内容 iconutil 拒收;
-# 坑②:32px 页必须标 144dpi 保持 16pt 表示,否则菜单把选项行高撑成两倍
+# App 圖示由 Data/logo.png 產生；輸入來源另用簡約「中」模板。
+# Retina 表示必須保留相同點尺寸，避免輸入來源選單行高變大。
 ICON=""
 TISICON=""
 if [ -f Data/logo.png ]; then
@@ -101,14 +96,12 @@ if [ -f Data/logo.png ]; then
   done
   iconutil -c icns "$ICONSET" -o build/AppIcon.icns && ICON="build/AppIcon.icns" && rm -rf "$ICONSET"
   [ -z "$ICON" ] && echo "!! AppIcon.icns 生成失败——两包将无 Finder 图标"
-  sips -s format tiff -z 16 16 Data/logo.png --out build/icon16.tiff >/dev/null
-  sips -s format tiff -z 32 32 Data/logo.png --out build/icon32.tiff >/dev/null
-  sips -s dpiHeight 144 -s dpiWidth 144 build/icon32.tiff >/dev/null
-  if tiffutil -cat build/icon16.tiff build/icon32.tiff -out build/icon.tiff >/dev/null 2>&1; then
-    TISICON="build/icon.tiff"
-  fi
-  [ -z "$TISICON" ] && echo "!! icon.tiff 生成失败——输入菜单/系统设置将无图标"
+
 fi
+
+# 選單列使用獨立的黑／透明「中」模板，保留 22×16 pt 的 1×／2× 表示。
+swift scripts/make_menu_icon.swift build/InputMenuTemplate.tiff
+TISICON="build/InputMenuTemplate.tiff"
 
 # 单一产物: build/AFM輸入法.app = 输入法引擎(部署到 ~/Library/Input Methods/AFM輸入法.app),
 # 设置中心作为 helper 嵌在 Contents/PlugIns/AFMSettings.app(经输入法菜单「设置…」打开,
@@ -124,7 +117,7 @@ cp Data/builtin-user-words.json "$APP/Contents/Resources/builtin-user-words.json
 # 原始資料由 mkstemp 生成時是 600；App 裝到系統目錄後，所有使用者都必須能讀取詞庫。
 install -m 644 Data/quick.json "$APP/Contents/Resources/quick.json"
 [ -n "$METALLIB" ] && cp "$METALLIB" "$APP/Contents/Resources/default.metallib"
-[ -n "$TISICON" ] && cp "$TISICON" "$APP/Contents/Resources/icon.tiff"
+[ -n "$TISICON" ] && cp "$TISICON" "$APP/Contents/Resources/InputMenuTemplate.tiff"
 [ -n "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 
 # 輸入源顯示名:TIS 以輸入源 ID 到 InfoPlist.strings 查名稱；兩種 mode 各有本地化名稱。
@@ -163,8 +156,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.5</string>
-	<key>CFBundleVersion</key><string>2026101505</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.6</string>
+	<key>CFBundleVersion</key><string>2026101506</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -175,7 +168,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>TICapsLockLanguageSwitchCapable</key><true/>
 	<key>tsInputMethodCharacterRepertoireKey</key>
 	<array><string>Hans</string><string>Hant</string><string>Latn</string></array>
-	<key>tsInputMethodIconFileKey</key><string>icon.tiff</string>
+	<key>TISIconIsTemplate</key><true/>
+	<key>tsInputMethodIconFileKey</key><string>InputMenuTemplate.tiff</string>
 	<key>ComponentInputModeDict</key>
 	<dict>
 		<key>tsInputModeListKey</key>
@@ -184,9 +178,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 			<dict>
 				<key>TISInputSourceID</key><string>moe.bemly.inputmethod.AfmIME.afmpinyin.hans</string>
 				<key>TISIntendedLanguage</key><string>zh-Hans</string>
-				<key>tsInputModeMenuIconFileKey</key><string>icon.tiff</string>
-				<key>tsInputModeAlternateMenuIconFileKey</key><string>icon.tiff</string>
-				<key>tsInputModePaletteIconFileKey</key><string>icon.tiff</string>
+				<key>TISIconIsTemplate</key><true/>
+				<key>tsInputModeMenuIconFileKey</key><string>InputMenuTemplate.tiff</string>
+				<key>tsInputModeAlternateMenuIconFileKey</key><string>InputMenuTemplate.tiff</string>
+				<key>tsInputModePaletteIconFileKey</key><string>InputMenuTemplate.tiff</string>
 				<key>tsInputModeCharacterRepertoireKey</key>
 				<array><string>Hans</string><string>Latn</string></array>
 				<key>tsInputModeDefaultStateKey</key><false/>
@@ -199,9 +194,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 			<dict>
 				<key>TISInputSourceID</key><string>moe.bemly.inputmethod.AfmIME.afmquick.hant</string>
 				<key>TISIntendedLanguage</key><string>zh-Hant</string>
-				<key>tsInputModeMenuIconFileKey</key><string>icon.tiff</string>
-				<key>tsInputModeAlternateMenuIconFileKey</key><string>icon.tiff</string>
-				<key>tsInputModePaletteIconFileKey</key><string>icon.tiff</string>
+				<key>TISIconIsTemplate</key><true/>
+				<key>tsInputModeMenuIconFileKey</key><string>InputMenuTemplate.tiff</string>
+				<key>tsInputModeAlternateMenuIconFileKey</key><string>InputMenuTemplate.tiff</string>
+				<key>tsInputModePaletteIconFileKey</key><string>InputMenuTemplate.tiff</string>
 				<key>tsInputModeCharacterRepertoireKey</key>
 				<array><string>Hant</string><string>Latn</string></array>
 				<key>tsInputModeDefaultStateKey</key><false/>
@@ -238,8 +234,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.5</string>
-	<key>CFBundleVersion</key><string>2026101505</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.6</string>
+	<key>CFBundleVersion</key><string>2026101506</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>
