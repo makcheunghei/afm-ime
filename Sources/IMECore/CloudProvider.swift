@@ -8,6 +8,7 @@ import FoundationModels
 ///   openai    POST {base}/chat/completions  instructions→system,prompt→user;Authorization: Bearer
 ///   anthropic POST {base}/v1/messages       instructions→system 参数,prompt→user;x-api-key +
 ///                                           anthropic-version: 2023-06-01;max_tokens 必带(取 1024)
+@available(macOS 27.0, *)
 public struct CloudProviderModel: LanguageModel {
     public typealias Executor = CloudProviderExecutor
 
@@ -71,6 +72,7 @@ public struct CloudProviderModel: LanguageModel {
     }
 }
 
+@available(macOS 27.0, *)
 public actor CloudProviderExecutor: LanguageModelExecutor {
     public typealias Model = CloudProviderModel
     public typealias Configuration = CloudProviderModel.Config

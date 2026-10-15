@@ -812,7 +812,9 @@ final class CandidateWindowController {
         container.wantsLayer = true
         let glass = NSGlassEffectView()
         glass.cornerRadius = 22
-        glass.effectIsInteractive = true
+        // 標準材質讓系統處理透明度及輔助使用設定；26 沿用原生預設。
+        glass.style = .regular
+        if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
         glass.contentView = barHost
         container.addSubview(glass)
         glassView = glass
@@ -889,11 +891,8 @@ final class CandidateWindowController {
 
     /// 顯示 Quick 候選面板。items 保留全量候選及其全域 index，點選回傳該 index。
     func showQuick(items: [CandidateItem], selectedIndex: Int, pageStart: Int,
-                   pageSize: Int = 9, expanded: Bool, association: Bool,
-                   caretRect: NSRect, onSelect: @escaping (Int) -> Void,
-                   onPreviousPage: @escaping () -> Void,
-                   onNextPage: @escaping () -> Void,
-                   onToggleExpand: @escaping () -> Void) {
+                   pageSize: Int = 9, association: Bool,
+                   caretRect: NSRect, onSelect: @escaping (Int) -> Void) {
         panel?.orderOut(nil)
         onFrameChange?(nil)
         let panel = ensureQuickPanel()
@@ -902,9 +901,7 @@ final class CandidateWindowController {
 
         host.rootView = QuickCandidateView(
             items: items, selectedIndex: selectedIndex, pageStart: pageStart,
-            pageSize: pageSize, expanded: expanded, association: association,
-            onSelect: onSelect, onPreviousPage: onPreviousPage,
-            onNextPage: onNextPage, onToggleExpand: onToggleExpand)
+            pageSize: pageSize, association: association, onSelect: onSelect)
 
         let desired = host.fittingSize
         let screen = screen(for: caretRect)
@@ -931,7 +928,7 @@ final class CandidateWindowController {
         panel.setFrameOrigin(origin)
         panel.orderFront(nil)
         onFrameChange?(panel.frame)
-        DebugLog.log("quick layout panel=\(NSStringFromRect(panel.frame)) glass=\(NSStringFromRect(glass.frame)) caret=\(NSStringFromRect(caretRect)) screen=\(screen?.localizedName ?? "?") 候選=\(items.count) 起點=\(pageStart) 展開=\(expanded) 聯想=\(association)")
+        DebugLog.log("quick layout panel=\(NSStringFromRect(panel.frame)) glass=\(NSStringFromRect(glass.frame)) caret=\(NSStringFromRect(caretRect)) screen=\(screen?.localizedName ?? "?") 候選=\(items.count) 起點=\(pageStart) 聯想=\(association)")
     }
 
     private func ensureQuickPanel() -> NSPanel {
@@ -952,11 +949,12 @@ final class CandidateWindowController {
         container.wantsLayer = true
         let host = NSHostingView(rootView: QuickCandidateView(
             items: [], selectedIndex: 0, pageStart: 0, pageSize: 9,
-            expanded: false, association: false, onSelect: { _ in },
-            onPreviousPage: {}, onNextPage: {}, onToggleExpand: {}))
+            association: false, onSelect: { _ in }))
         let glass = NSGlassEffectView()
         glass.cornerRadius = 18
-        glass.effectIsInteractive = true
+        // 標準材質讓系統處理透明度及輔助使用設定；26 沿用原生預設。
+        glass.style = .regular
+        if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
         glass.contentView = host
         container.addSubview(glass)
         panel.contentView = container

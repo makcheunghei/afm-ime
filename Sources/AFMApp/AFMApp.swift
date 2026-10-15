@@ -138,6 +138,10 @@ final class AppModel: ObservableObject {
     }
 
     func testCloud() {
+        guard #available(macOS 27.0, *) else {
+            cloudTestResult = "雲端 AI 需要 macOS 27 或以上；目前可使用本機 AI 及詞庫輸入。"
+            return
+        }
         guard !cloudTesting else { return }
         cloudTesting = true
         cloudTestResult = ""
@@ -853,6 +857,11 @@ struct ModelView: View {
                     Text("请求结构沿用 fm 框架:提示词=系统消息(instructions),请求体=用户消息(prompt),由 FoundationModels Provider 协议的 Executor 转换。密钥明文存本机 IME 域;远程地址仅支持 https(本机 http 如 Ollama 可用);启用后组词上文与拼音会发送到所选服务商,注重隐私请勿启用。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                .disabled(!ModelPrefs.supportsCloudModels)
+                if !ModelPrefs.supportsCloudModels {
+                    Text("雲端 AI 需要 macOS 27 或以上；macOS 26 可使用本機 AI 及詞庫輸入。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 GlassCard(title: "提示词(内置默认已预填;编辑后点「应用」生效,云端启用时同样生效)") {
                     promptEditor("候选重排(只输出序号数字)", $model.promptRerank)
                     promptEditor("整句预测(只输出中文)", $model.promptSentence)
@@ -923,7 +932,7 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 GlassCard(title: "繁體速成") {
-                    Text("預設沿用 Windows 候選次序，每頁 9 字；空格翻頁、Enter 選字，Shift＋數字選聯想。")
+                    Text("預設沿用 Windows 候選次序，每頁 9 字；左右鍵／空格翻頁、Enter 選字，Shift＋數字選聯想。")
                         .font(.callout).foregroundStyle(.secondary)
                     Toggle("完整字集（加入擴展字及其他碼字映射）", isOn: $model.quickFullCharset)
                     Toggle("記住速成選字（只影響速成排序）", isOn: $model.quickLearning)
@@ -931,7 +940,7 @@ struct SettingsView: View {
                     Text("AI 推薦放在第二位並標記 ✦；開始移動選項或翻頁後，當次候選次序會鎖定。")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("速成使用雲端 AI", isOn: $model.quickCloud)
-                        .disabled(!model.quickAI)
+                        .disabled(!model.quickAI || !ModelPrefs.supportsCloudModels)
                     Text("預設使用本機模型。雲端沿用「模型」頁的連線設定；開啟後會傳送速成碼、候選及光標前的部分文字。")
                         .font(.caption).foregroundStyle(.secondary)
                 }

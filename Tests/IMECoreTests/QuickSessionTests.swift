@@ -343,7 +343,7 @@ struct QuickSessionTests {
 
         let idleKeys: [QuickKey] = [
             .space, .enter, .backspace, .escape,
-            .previousPage, .nextPage, .previousCandidate, .nextCandidate, .expand,
+            .previousPage, .nextPage, .previousCandidate, .nextCandidate,
             .digit(0, shifted: false), .digit(1, shifted: false), .digit(1, shifted: true),
         ]
         for key in idleKeys {
@@ -446,7 +446,7 @@ struct QuickSessionTests {
         #expect(session.markedText == "我")
     }
 
-    // MARK: - 導航 / 展開
+    // MARK: - 導航 / 鍵盤翻頁
 
     @Test func candidateNavigationCyclesWithinPageAndLocksOrder() {
         let (session, _) = makeSession()
@@ -472,24 +472,38 @@ struct QuickSessionTests {
         #expect(session.selectedIndex == 9)
     }
 
-    @Test func expandTogglesTwoColumnWindowAndLocksOrder() {
+    @Test func physicalArrowKeysPageAndSelectWithinOneColumn() throws {
         let (session, _) = makeSession()
         type("aa", session)
+        let right = try #require(QuickKey.navigationKey(keyCode: 124))
+        let left = try #require(QuickKey.navigationKey(keyCode: 123))
+        let down = try #require(QuickKey.navigationKey(keyCode: 125))
+        let up = try #require(QuickKey.navigationKey(keyCode: 126))
 
-        let expand = session.handle(.expand)
-        #expect(expand.consumed)
-        #expect(session.expanded)
-        #expect(session.orderLocked)
-        #expect(session.handle(.expand).consumed)
-        #expect(!session.expanded)
+        #expect(session.handle(right).commits.isEmpty)
+        #expect(session.pageStart == 9)
+        #expect(session.markedText == "閶")
+        session.handle(down)
+        #expect(session.markedText == "閽")
+        session.handle(up)
+        #expect(session.markedText == "閶")
+        session.handle(right)
+        #expect(session.pageStart == 0, "右鍵由尾頁循環回首頁")
+        session.handle(left)
+        #expect(session.pageStart == 9, "左鍵由首頁循環到尾頁")
+        #expect(session.handle(.digit(2, shifted: false)).commits == ["閽"])
+        #expect(QuickKey.navigationKey(keyCode: 48) == nil, "Tab 不再攔截作候選展開")
+    }
 
-        // 單碼：Tab 開窗並展開。
-        let (single, _) = makeSession()
-        type("a", single)
-        #expect(!single.isCandidateWindowVisible)
-        #expect(single.handle(.expand).consumed)
-        #expect(single.isCandidateWindowVisible)
-        #expect(single.expanded)
+    @Test func associationRightArrowPagesBeforeShiftDigitSelection() throws {
+        let continuations = (0..<11).map { "續\($0)" }
+        let (session, _) = makeSession(associations: ["你": continuations])
+        startAssociation(session)
+        let right = try #require(QuickKey.navigationKey(keyCode: 124))
+        session.handle(right)
+        #expect(session.pageStart == 9)
+        #expect(session.handle(.digit(2, shifted: true)).commits == ["續10"])
+        #expect(!session.isAssociation)
     }
 
     // MARK: - 超過 100 個候選的尾頁 wrap
@@ -687,18 +701,12 @@ struct QuickSessionTests {
         #expect(!session.applyRecommendation("", generation: generation))
     }
 
-    @Test func applyRecommendationRejectedAfterNavigationExpandOrSelection() {
+    @Test func applyRecommendationRejectedAfterNavigationOrPaging() {
         let (session, _) = makeSession()
         type("aa", session)
         let generation = session.generation
         session.handle(.nextCandidate)
         #expect(!session.applyRecommendation("曙", generation: generation), "導航後鎖序")
-
-        let (expandSession, _) = makeSession()
-        type("aa", expandSession)
-        let expandGeneration = expandSession.generation
-        expandSession.handle(.expand)
-        #expect(!expandSession.applyRecommendation("曙", generation: expandGeneration))
 
         let (pageSession, _) = makeSession()
         type("aa", pageSession)

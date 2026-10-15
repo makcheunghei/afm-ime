@@ -22,7 +22,6 @@ public final class QuickSession {
     public private(set) var candidates: [String] = []
     public private(set) var selectedIndex: Int = 0
     public private(set) var pageStart: Int = 0
-    public private(set) var expanded: Bool = false
     public private(set) var isAssociation: Bool = false
     public private(set) var isCandidateWindowVisible: Bool = false
     public private(set) var orderLocked: Bool = false
@@ -69,8 +68,6 @@ public final class QuickSession {
             return moveCandidate(step: -1)
         case .nextCandidate:
             return moveCandidate(step: 1)
-        case .expand:
-            return toggleExpanded()
         }
     }
 
@@ -94,7 +91,6 @@ public final class QuickSession {
         candidates = []
         selectedIndex = 0
         pageStart = 0
-        expanded = false
         isAssociation = false
         isCandidateWindowVisible = false
         orderLocked = false
@@ -128,7 +124,7 @@ public final class QuickSession {
         generation &+= 1
     }
 
-    /// 延遲到達的 AI 建議：代際要相同、仍在字碼態、未被導航／翻頁／展開鎖定，
+    /// 延遲到達的 AI 建議：代際要相同、仍在字碼態、未被導航／翻頁鎖定，
     /// 該字必須已在候選內且不是第一候選；只把它搬到 index 1，第一候選不動、不新增生成字。
     public func applyRecommendation(_ text: String, generation: UInt64) -> Bool {
         guard generation == self.generation,
@@ -182,7 +178,6 @@ public final class QuickSession {
         candidates = engine.candidates(for: newCode, fullCharset: fullCharset, learning: learning)
         selectedIndex = 0
         pageStart = 0
-        expanded = false
         isAssociation = false
         orderLocked = false
         aiRecommendation = nil
@@ -269,7 +264,7 @@ public final class QuickSession {
         return QuickResult(consumed: true)
     }
 
-    // MARK: - 翻頁 / 導航 / 展開
+    // MARK: - 翻頁 / 導航
 
     private func movePage(step: Int) -> QuickResult {
         if isIdle { return QuickResult(consumed: false) }
@@ -307,15 +302,6 @@ public final class QuickSession {
         return QuickResult(consumed: true)
     }
 
-    private func toggleExpanded() -> QuickResult {
-        if isIdle { return QuickResult(consumed: false) }
-        guard !candidates.isEmpty else { return QuickResult(consumed: true) }
-        expanded.toggle()
-        if !isAssociation { isCandidateWindowVisible = true }
-        orderLocked = true
-        return QuickResult(consumed: true)
-    }
-
     // MARK: - 提交 / 聯想 / 學習
 
     /// 提交目前選中候選；無候選時提交實際 code 文字（原樣，不會用 preview 的根 glyph 頂替，亦不丟輸入）。
@@ -337,7 +323,6 @@ public final class QuickSession {
         candidates = list
         selectedIndex = 0
         pageStart = 0
-        expanded = false
         orderLocked = false
         aiRecommendation = nil
         isAssociation = !list.isEmpty
@@ -362,7 +347,17 @@ public enum QuickKey: Equatable {
     case nextPage
     case previousCandidate
     case nextCandidate
-    case expand
+
+    /// 左右固定翻頁、上下選字；Tab 不屬於速成按鍵，交回應用程式。
+    public static func navigationKey(keyCode: UInt16) -> QuickKey? {
+        switch keyCode {
+        case 116, 123: return .previousPage
+        case 121, 124: return .nextPage
+        case 126: return .previousCandidate
+        case 125: return .nextCandidate
+        default: return nil
+        }
+    }
 
     /// AppKit 的 charactersIgnoringModifiers 仍可包含 Shift 產生的符號。
     /// 普通數字尊重鍵盤配置；Shift＋數字以數字列／數字鍵盤鍵碼識別。

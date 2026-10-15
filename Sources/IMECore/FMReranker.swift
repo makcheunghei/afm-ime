@@ -34,7 +34,8 @@ public final class FMReranker {
     /// 都失败 → nil。label 仅用于日志区分(重排/整句/翻译)。
     private func respond(label: String, instructions: String, prompt: String,
                          cloudOverride: Bool? = nil) async -> String? {
-        if cloudOverride ?? ModelPrefs.cloudEnabled, let cfg = CloudProviderModel.configured() {
+        if #available(macOS 27.0, *), cloudOverride ?? ModelPrefs.cloudEnabled,
+           let cfg = CloudProviderModel.configured() {
             let t0 = Date()
             do {
                 let session = LanguageModelSession(model: CloudProviderModel(config: cfg),

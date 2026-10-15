@@ -19,6 +19,12 @@ public enum ModelPrefs {
     public static let promptTranslateENKey = "AFMFMPromptTranslateEN" // 中文→英
     public static let promptTranslateZHKey = "AFMFMPromptTranslateZH" // 外文→中
 
+    /// Foundation Models 的自訂雲端模型接入只在 macOS 27 或以上提供。
+    public static var supportsCloudModels: Bool {
+        if #available(macOS 27.0, *) { return true }
+        return false
+    }
+
     public static var cloudEnabled: Bool {
         UserDefaults.standard.object(forKey: cloudEnabledKey) as? Bool ?? false
     }

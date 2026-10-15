@@ -492,13 +492,7 @@ final class InputController: IMKInputController {
         case 36, 76: key = .enter
         case 51: key = .backspace
         case 53: key = .escape
-        case 116: key = .previousPage
-        case 121: key = .nextPage
-        case 126: key = .previousCandidate
-        case 125: key = .nextCandidate
-        case 123: key = session.expanded ? .previousPage : .previousCandidate
-        case 124: key = session.expanded ? .nextPage : .nextCandidate
-        case 48: key = .expand
+        case 116, 121, 123...126: key = QuickKey.navigationKey(keyCode: event.keyCode)
         default:
             if let c = chars.lowercased().first, ("a"..."z").contains(c), !shifted,
                !modifiers.contains(.capsLock) { key = .letter(c) }
@@ -553,7 +547,7 @@ final class InputController: IMKInputController {
         Self.latestCaret = caret
         candidateWindow.showQuick(
             items: items, selectedIndex: session.selectedIndex, pageStart: session.pageStart,
-            expanded: session.expanded, association: session.isAssociation, caretRect: caret,
+            association: session.isAssociation, caretRect: caret,
             onSelect: { [weak self] index in
                 DispatchQueue.main.async {
                     guard let self, self.inputMode == .quick, self.quickActive,
@@ -566,20 +560,8 @@ final class InputController: IMKInputController {
                     }
                     self.applyQuickResult(session.select(index: currentIndex), client: self.client())
                 }
-            },
-            onPreviousPage: { [weak self] in self?.quickWindowAction(.previousPage, generation: generation) },
-            onNextPage: { [weak self] in self?.quickWindowAction(.nextPage, generation: generation) },
-            onToggleExpand: { [weak self] in self?.quickWindowAction(.expand, generation: generation) })
+            })
         DebugLog.log("速成候選：碼=\(session.code) 聯想=\(session.isAssociation) 頁=\(session.pageStart / 9 + 1) n=\(items.count)")
-    }
-
-    private func quickWindowAction(_ key: QuickKey, generation: UInt64) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.inputMode == .quick, self.quickActive,
-                  let session = self.quickSession, session.generation == generation else { return }
-            session.updateOptions(fullCharset: QuickPrefs.fullCharsetEnabled, learning: QuickPrefs.learningEnabled)
-            self.applyQuickResult(session.handle(key), client: self.client())
-        }
     }
 
     private func finishQuickComposition(_ client: Any!) {

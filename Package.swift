@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "afm-ime",
-    platforms: [.macOS("27.0")],
+    platforms: [.macOS("26.0")],
     targets: [
         .target(name: "IMECore", path: "Sources/IMECore"),
         .executableTarget(name: "dictcompiler", dependencies: ["IMECore"], path: "Sources/DictCompiler"),

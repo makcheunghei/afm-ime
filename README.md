@@ -2,19 +2,21 @@
 
 同一個 macOS App 提供 **AFM拼音**及新增的 **AFM速成**兩個系統輸入來源，共用設定中心及 Liquid Glass 框架。拼音保留原有引擎、完整詞庫及模型功能；繁體速成使用從 Windows 提取的原生字碼及聯想資料，預設固定次序，完整字集、個人學習及 AI 重排均可獨立手動開啟。
 
-**純 Swift、無第三方依賴，macOS 27+。**可用 Xcode 27 或 Command Line Tools 27 構建；拼音水滴的 Metal 折射效果需要 Xcode Metal 工具鏈。AI 可使用本機 Apple Foundation Models，或手動啟用已配置的雲端模型。
+**純 Swift、無第三方依賴，最低部署版本 macOS 26。**可用 Xcode 27 或 Command Line Tools 27 構建；拼音水滴的 Metal 折射效果需要 Xcode Metal 工具鏈。AI 可使用本機 Apple Foundation Models；macOS 27 或以上亦可手動啟用已配置的雲端模型。macOS 26 的執行期相容性仍待實機驗收。
 
-![平台](https://img.shields.io/badge/macOS-27%20(Apple%20Intelligence)-blue) ![构建](https://img.shields.io/badge/Swift-6.4%20·%20Xcode%2027-orange)
+![平台](https://img.shields.io/badge/macOS-26%2B%20(Apple%20Intelligence)-blue) ![构建](https://img.shields.io/badge/Swift-6.4%20·%20Xcode%2027-orange)
 
-目前可用基礎版為 **2026.10.15**：[下載安裝包及查看版本說明](https://github.com/makcheunghei/afm-ime/releases/tag/v2026.10.15)。安裝包已包含拼音及速成詞庫；由原始碼構建則須按下文準備詞庫資料。
+已發佈的可用基礎版為 **2026.10.15（macOS 27+）**：[下載安裝包及查看版本說明](https://github.com/makcheunghei/afm-ime/releases/tag/v2026.10.15)。安裝包已包含拼音及速成詞庫；由原始碼構建則須按下文準備詞庫資料。
 
 ## 繁體速成
 
-- **Windows 操作習慣**：每頁 9 個候選；一碼先顯示預覽，空格開窗；雙碼自動開窗；數字選字、Enter 選取高亮候選、空格／Page Down 翻頁、Page Up 返回、Tab 展開兩列。展開時顯示目前頁碼，只有當頁標示數字選字快捷鍵。
+- **單欄候選及鍵盤翻頁**：每頁最多 9 個候選，頂部只顯示目前頁／總頁數（例如 `1/2`）；左右方向鍵翻頁，上下方向鍵移動選項。保留一碼預覽、空格開窗、雙碼自動開窗、數字選字、Enter 選取高亮候選及空格／Page Down／Page Up 翻頁；沒有展開模式或翻頁按鈕，Tab 交回應用程式。
 - **原生聯想**：選字後顯示續文，以 Shift＋1–9 選取；聯想提交後關窗，不再自動連鎖開窗。
 - **固定字序為預設**：完整字集及速成個人學習各有獨立開關，預設關閉；學習資料與拼音分開，關閉時不寫入速成學習資料。
-- **速成 AI 預設關閉**：開啟後保留第一候選，推薦放第二位並標記 ✦；導航、翻頁或展開後鎖定本次次序。雲端有另一個獨立開關，未開啟時只使用本機模型。
+- **速成 AI 預設關閉**：開啟後保留第一候選，推薦放第二位並標記 ✦；導航或翻頁後鎖定本次次序。雲端有另一個獨立開關，未開啟時只使用本機模型。
 - **已核對的 Windows 樣本**：`aa` 的 18 個候選及「你、晶、香、港、好、暑」六組聯想。全碼排序、擴展字篩選及其他字詞仍需逐步對照，現階段不保證所有字碼與 Windows 完全一致。資料來源、數量及驗證範圍見 [速成說明](docs/quick.md)。
+
+候選面板使用系統原生標準 Liquid Glass 材質，不另設透明度或色調覆蓋；macOS 27 自動跟隨系統透明度及輔助使用設定，macOS 26 使用預設效果。
 
 ## 拼音及共用功能
 
@@ -54,7 +56,7 @@
 
 ## 构建 / 安装
 
-使用 macOS 27 SDK。Xcode 27 是主構建路徑；沒有 Xcode 時自動使用 Command Line Tools，保留 Liquid Glass 候選窗，拼音水滴沒有 Metal 折射。
+使用 macOS 27 SDK，部署目標為 macOS 26。Xcode 27 是主構建路徑；沒有 Xcode 時自動使用 Command Line Tools，保留 Liquid Glass 候選窗，拼音水滴沒有 Metal 折射。
 
 ```sh
 # Metal 工具链组件(~839MB,一次;DEVELOPER_DIR 指向你的 Xcode 安装)

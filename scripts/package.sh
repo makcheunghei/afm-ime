@@ -27,7 +27,7 @@ fi
 SIGN_ID="AFM-IME-Dev"
 security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_ID" || SIGN_ID="-"
 
-# 构建: xcodebuild(Xcode 工具链 + macOS 27 SDK,平台基线 platforms: [.macOS("27.0")])。
+# 构建: xcodebuild(Xcode 工具链 + macOS 27 SDK,部署基线 macOS 26)。
 # Xcode 缺失/构建失败时回退 swift build(CLT,SDK 同为 27)。
 # 工具链顺序: Xcode-beta.app(27,Swift 6.4)优先——26.x 工具链的 FoundationModels interface 把
 # Provider API 藏在 $AsyncExecutionBehaviorAttributes 特性门后,Swift 6.3.3 编不过(kb36 云端通道
@@ -154,11 +154,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleExecutable</key><string>AFMInput</string>
 	<key>CFBundleIdentifier</key><string>moe.bemly.inputmethod.AfmIME</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>LSMinimumSystemVersion</key><string>26.0</string>
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15</string>
-	<key>CFBundleVersion</key><string>20261015</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.1</string>
+	<key>CFBundleVersion</key><string>2026101501</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -232,12 +233,12 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15</string>
-	<key>CFBundleVersion</key><string>20261015</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.1</string>
+	<key>CFBundleVersion</key><string>2026101501</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>
-	<key>LSMinimumSystemVersion</key><string>27.0</string>
+	<key>LSMinimumSystemVersion</key><string>26.0</string>
 </dict>
 </plist>
 PLIST
