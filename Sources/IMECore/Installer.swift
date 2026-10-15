@@ -132,11 +132,9 @@ public enum IMEInstaller {
             return "已收錄 \(registered.joined(separator: "、"))；\(missing.joined(separator: "、")) 尚待系統收錄，請透過系統設定管理所需來源。"
         }
         let registered = registeredIDs.count == modeIDs.count
-        let refs = InputMethodMode.allCases.map { enabledRefCount(for: $0) }
-        if installed && registered && refs.allSatisfy({ $0 >= 1 }) {
-            return "已安裝，系統列出兩種模式；請透過系統設定獨立加入或移除來源。"
+        if installed && registered {
+            return "已安裝，系統已收錄兩種模式；請按需要透過系統設定獨立加入或移除來源。"
         }
-        if installed && registered { return "已安装未启用 — 点「安装并启用输入法」" }
         if installed { return "已安装,等待 TIS 收录 — 请注销并重新登录一次" }
         if registered { return "输入源已注册,app 未安装 — 点「安装并启用输入法」" }
         return "未安装 — 点「安装并启用输入法」"
