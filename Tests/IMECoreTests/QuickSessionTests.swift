@@ -14,6 +14,7 @@ struct QuickSessionTests {
     private var windowsCandidates: [String: [String]] {
         [
             "a": ["日", "曰"],
+            "m": ["一"],
             "aa": aaPage1 + aaPage2,
             "of": ["我", "你", "他"],
             "za": ["　", "〼", "𠮷"],
@@ -99,68 +100,81 @@ struct QuickSessionTests {
         #expect(QuickKey.digitValue(keyCode: 82, characters: ")", shifted: true) == 0)
     }
 
-    @Test func singleCodeShowsPreviewWithoutWindowAndSpaceOpensCandidates() {
+    @Test func singleMCodeSpaceImmediatelyCommitsOne() {
         let (session, _) = makeSession()
-
-        #expect(type("a", session).consumed)
-        #expect(session.code == "a")
-        #expect(session.candidates == ["日", "曰"])
-        #expect(session.markedText == "日")
-        #expect(!session.isCandidateWindowVisible, "1 字碼有 preview 不開窗")
+        #expect(type("m", session).consumed)
+        #expect(session.markedText == "一")
+        #expect(!session.isCandidateWindowVisible)
+        let generation = session.generation
 
         let space = session.handle(.space)
         #expect(space.consumed)
-        #expect(space.commits.isEmpty, "Space 開候選窗，不直接上屏")
-        #expect(session.isCandidateWindowVisible)
-        #expect(session.code == "a")
-        #expect(session.pageStart == 0)
-        #expect(session.selectedIndex == 0)
-        #expect(session.markedText == "日")
-
-        // 只有一頁時再按 Space wrap 回首頁，窗照留。
-        #expect(session.handle(.space).consumed)
-        #expect(session.pageStart == 0)
-        #expect(session.isCandidateWindowVisible)
+        #expect(space.commits == ["一"], "M 預覽一後，只需一次空白便直接上屏")
+        #expect(session.code.isEmpty)
+        #expect(session.markedText.isEmpty)
+        #expect(!session.isCandidateWindowVisible)
+        #expect(session.generation > generation, "確認後舊 AI 請求失效")
+        #expect(!session.handle(.space).consumed, "沒有組字時，普通空白交回應用程式")
     }
 
-    @Test func singleCodeSpaceThenDigitCommitsThatCandidate() {
+    @Test func singleCodeDigitCommitsCandidateWithoutSpace() {
         let (session, _) = makeSession()
         type("a", session)
-        session.handle(.space)
-
         let result = session.handle(.digit(2, shifted: false))
         #expect(result.commits == ["曰"])
         #expect(result.consumed)
     }
 
-    // MARK: - aa → Space → Enter 閶
-
-    @Test func secondLetterOpensWindowAndSpacePagesThenEnterCommits() {
+    @Test func singleCodeSpaceCommitsSelectionAndOpensAssociations() {
         let (session, _) = makeSession()
+        type("a", session)
+        #expect(session.markedText == "日")
+        let space = session.handle(.space)
+        #expect(space.commits == ["日"])
+        #expect(session.code.isEmpty)
+        #expect(session.markedText.isEmpty)
+        #expect(session.isAssociation)
+        #expect(session.candidates == ["本", "出"])
+    }
 
+    // MARK: - 空白確認字碼；左右鍵翻頁
+
+    @Test func secondLetterSpaceConfirmsFirstCandidateWithoutPaging() {
+        let (session, _) = makeSession()
         type("aa", session)
-        #expect(session.isCandidateWindowVisible, "第 2 字碼自動開窗")
+        #expect(session.isCandidateWindowVisible)
         #expect(session.candidates == aaPage1 + aaPage2)
-        #expect(session.selectedIndex == 0)
         #expect(session.markedText == "昌")
-        #expect(!session.orderLocked)
 
         let space = session.handle(.space)
         #expect(space.consumed)
-        #expect(space.commits.isEmpty)
-        #expect(session.pageStart == 9)
-        #expect(session.selectedIndex == 9)
-        #expect(session.markedText == "閶")
-        #expect(session.orderLocked, "翻頁後鎖序")
+        #expect(space.commits == ["昌"], "空白確認首頁高亮候選，不能先跳到閶")
+        #expect(session.code.isEmpty)
+        #expect(session.isAssociation)
+        #expect(session.candidates == ["明", "亮"])
+    }
 
-        let enter = session.handle(.enter)
-        #expect(enter.consumed)
-        #expect(enter.commits == ["閶"])
-        #expect(session.code == "")
-        #expect(session.candidates == [], "閶 無聯想資料 → 回到 idle")
-        #expect(!session.isAssociation)
+    @Test func spaceConfirmsNavigatedCandidateOnSecondPage() throws {
+        let (session, _) = makeSession()
+        type("aa", session)
+        session.handle(try #require(QuickKey.navigationKey(keyCode: 124)))
+        session.handle(try #require(QuickKey.navigationKey(keyCode: 125)))
+        #expect(session.pageStart == 9)
+        #expect(session.markedText == "閽")
+
+        let space = session.handle(.space)
+        #expect(space.consumed)
+        #expect(space.commits == ["閽"])
+        #expect(session.code.isEmpty)
         #expect(!session.isCandidateWindowVisible)
-        #expect(!session.orderLocked)
+    }
+
+    @Test func spaceWithoutCandidatesCommitsOriginalCode() {
+        let (session, _) = makeSession()
+        type("zz", session)
+        #expect(session.handle(.space).commits == ["zz"])
+        #expect(session.code.isEmpty)
+        #expect(!session.isCandidateWindowVisible)
     }
 
     @Test func twoPageCodeWrapsBackToFirstPage() {
@@ -527,11 +541,6 @@ struct QuickSessionTests {
         #expect(session.pageStart == 0, "尾頁 PageDown wrap 首頁")
         #expect(session.selectedIndex == 0)
 
-        for _ in 0..<13 { session.handle(.space) }
-        #expect(session.pageStart == 117, "Space 與 PageDown 同款")
-        #expect(session.handle(.space).consumed)
-        #expect(session.pageStart == 0)
-
         #expect(session.handle(.previousPage).consumed)
         #expect(session.pageStart == 117, "首頁 PageUp wrap 尾頁")
         #expect(session.candidates.count - session.pageStart == 8, "尾頁不足 9 格")
@@ -560,7 +569,7 @@ struct QuickSessionTests {
     @Test func supplementaryPlaneCandidateOnSecondPageCommits() {
         let (session, _) = makeSession()
         type("aa", session)
-        session.handle(.space)
+        session.handle(.nextPage)
         for _ in 0..<7 { session.handle(.nextCandidate) }   // 第 2 頁第 8 項
 
         #expect(session.selectedIndex == 16)
@@ -766,7 +775,7 @@ struct QuickSessionTests {
     @Test func finishCompositionCommitsCurrentPageSelectionAndClearsState() {
         let (session, _) = makeSession()
         type("aa", session)
-        session.handle(.space)
+        session.handle(.nextPage)
 
         #expect(session.finishComposition() == "閶")
         #expect(session.code == "")

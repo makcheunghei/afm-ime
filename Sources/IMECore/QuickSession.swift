@@ -232,8 +232,9 @@ public final class QuickSession {
             // 聯想窗 Space：吞鍵、不選第一項、窗照留。
             return QuickResult(consumed: true)
         }
-        // 字碼態 Space 與 PageDown 同款：未開窗先開首頁，已開窗跳下一頁。
-        return movePage(step: 1)
+        // 字碼態空白立即確認目前候選，包括只有預覽、尚未開窗的一碼。
+        guard hasActiveCode else { return QuickResult(consumed: false) }
+        return QuickResult(consumed: true, commits: commitCurrentSelection(openAssociation: true))
     }
 
     private func handleEnter() -> QuickResult {
