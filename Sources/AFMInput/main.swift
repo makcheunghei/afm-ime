@@ -59,9 +59,16 @@ func checkQuickData() -> Int32 {
                 print("英文被自動轉成中文：\(text)"); return 1
             }
         }
-        guard session.markedText == text, session.handle(.space).commits == [text + " "] else {
-            print("英文大小寫／空白確認失敗：\(text)"); return 1
+        guard session.markedText == text, session.handle(.enter).commits == [text] else {
+            print("英文大小寫／Enter 確認失敗：\(text)"); return 1
         }
+    }
+    for (code, expected) in [("m", "一"), ("o", "人")] {
+        for letter in code { _ = session.handle(.letter(letter)) }
+        guard session.handle(.space).commits == [expected] else {
+            print("單碼空白確認失敗"); return 1
+        }
+        session.reset()
     }
     for letter in "ma" { _ = session.handle(.letter(letter)) }
     guard session.handle(.digit(1, shifted: false)).commits == ["百"] else {
@@ -69,7 +76,7 @@ func checkQuickData() -> Int32 {
     }
     session.reset()
     for letter in "aa" { _ = session.handle(.letter(letter)) }
-    let aaPage = session.handle(.nextPage)
+    let aaPage = session.handle(.space)
     session.updateOptions(fullCharset: false, learning: false)
     guard aaPage.consumed, aaPage.commits.isEmpty, session.pageStart == 9,
           session.markedText == "aa", session.handle(.digit(1, shifted: false)).commits == ["閶"] else {
@@ -80,13 +87,13 @@ func checkQuickData() -> Int32 {
     let pageCount = (session.candidates.count + QuickSession.pageSize - 1) / QuickSession.pageSize
     guard pageCount > 1 else { print("OF 候選不足兩頁"); return 1 }
     for page in 1..<pageCount {
-        let result = session.handle(.nextPage)
+        let result = session.handle(.space)
         guard result.consumed, result.commits.isEmpty, session.code == "of",
               session.pageStart == page * QuickSession.pageSize else {
             print("速成 OF 方向鍵翻頁失敗"); return 1
         }
     }
-    guard session.handle(.nextPage).commits.isEmpty, session.pageStart == 0,
+    guard session.handle(.space).commits.isEmpty, session.pageStart == 0,
           session.handle(.digit(2, shifted: false)).commits == ["你"],
           session.handle(.digit(1, shifted: true)).commits == ["們"],
           !session.isAssociation else {
@@ -105,7 +112,7 @@ func checkQuickData() -> Int32 {
         checkedCandidates &+= engine.candidates(for: lookupCodes[index % lookupCodes.count], fullCharset: true).count
     }
     let averageMS = Date().timeIntervalSince(start) * 1000 / 10_000
-    print("速成驗證通過：英文優先及大小寫、ma1 選百、方向鍵翻頁、逐字刪除、aa 18 字、六組聯想、完整字集及 Unicode")
+    print("速成驗證通過：英文 Enter 及大小寫、單碼空白出字、雙碼空白翻頁、ma1 選百、逐字刪除、aa 18 字、六組聯想、完整字集及 Unicode")
     print(String(format: "全字集查表平均 %.4f ms（10,000 次，候選數校驗 %d）", averageMS, checkedCandidates))
     return 0
 }
@@ -113,7 +120,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261015-english-first1"
+    static let buildTag = "20261015-mixed-space1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端

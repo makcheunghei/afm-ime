@@ -596,13 +596,13 @@ struct QuickSessionTests {
     // MARK: - 英文優先混輸
 
     @Test(arguments: ["m", "o", "I", "a", "am", "of", "AI", "ma", "zz", "makcheunghei", "MakCheungHei"])
-    func spaceCommitsExactEnglishAndOneSpace(text: String) {
+    func enterCommitsExactEnglish(text: String) {
         let (session, defaults) = makeSession(learning: true)
         for character in text {
             #expect(session.handle(.letter(character)).commits.isEmpty)
         }
         #expect(session.markedText == text)
-        #expect(session.handle(.space).commits == [text + " "])
+        #expect(session.handle(.enter).commits == [text])
         #expect(session.rawText.isEmpty)
         #expect(session.candidates.isEmpty)
         #expect(!session.isAssociation)
@@ -661,16 +661,61 @@ struct QuickSessionTests {
         #expect(defaults.dictionary(forKey: QuickPrefs.learningDataKey) == nil)
     }
 
-    @Test func arrowsPageWhileSpaceAlwaysCommitsEnglish() {
+    @Test func spacePagesDoubleCodeAndEnterStillCommitsEnglish() {
         let (session, _) = makeSession()
         type("aa", session)
-        session.handle(.nextPage)
+        #expect(session.handle(.space).commits.isEmpty)
         #expect(session.pageStart == 9)
         #expect(session.markedText == "aa")
-        #expect(session.handle(.space).commits == ["aa "])
+        #expect(session.handle(.space).commits.isEmpty)
+        #expect(session.pageStart == 0)
+        #expect(session.handle(.enter).commits == ["aa"])
         type("aa", session)
         session.handle(.nextPage)
         #expect(session.handle(.digit(1, shifted: false)).commits == ["閶"])
+    }
+
+    @Test func singleCodeSpaceSelectsChineseAndOpensAssociations() {
+        let (session, _) = makeSession()
+        for (code, expected) in [("o", "人"), ("M", "一"), ("a", "日")] {
+            session.reset()
+            type(code, session)
+            #expect(session.handle(.space).commits == [expected])
+            #expect(session.rawText.isEmpty)
+        }
+        #expect(session.isAssociation)
+        #expect(session.candidates == ["本", "出"])
+    }
+
+    @Test func singlePageSpaceDoesNotConfirmOrResetHighlight() {
+        let (session, _) = makeSession()
+        type("of", session)
+        session.handle(.nextCandidate)
+        for _ in 0..<3 {
+            #expect(session.handle(.space).commits.isEmpty)
+            #expect(session.rawText == "of")
+            #expect(session.selectedIndex == 1)
+            #expect(session.pageStart == 0)
+        }
+        #expect(session.handle(.digit(2, shifted: false)).commits == ["你"])
+    }
+
+    @Test func englishSpacesStayInCompositionUntilEnter() {
+        let (session, _) = makeSession()
+        type("MakCheungHei", session)
+        #expect(session.handle(.space).commits.isEmpty)
+        type("Hello", session)
+        #expect(session.markedText == "MakCheungHei Hello")
+        #expect(session.handle(.enter).commits == ["MakCheungHei Hello"])
+    }
+
+    @Test(arguments: ["z", "zz"])
+    func spaceWithoutCandidatesKeepsEnglishForEnter(text: String) {
+        let (session, _) = makeSession()
+        type(text, session)
+        #expect(session.handle(.space).commits.isEmpty)
+        #expect(session.rawText == text)
+        #expect(session.handle(.enter).commits == [text])
     }
 
     @Test func englishDigitsAndZeroRemainLiteral() {
@@ -678,7 +723,7 @@ struct QuickSessionTests {
         type("abc", session)
         for n in [1, 2, 3, 0] { #expect(session.handle(.digit(n, shifted: false)).commits.isEmpty) }
         #expect(session.markedText == "abc1230")
-        #expect(session.handle(.space).commits == ["abc1230 "])
+        #expect(session.handle(.enter).commits == ["abc1230"])
         type("of", session)
         session.handle(.digit(0, shifted: false))
         #expect(session.handle(.enter).commits == ["of0"])
@@ -709,7 +754,7 @@ struct QuickSessionTests {
         type("ma", session)
         #expect(session.handle(.digit(1, shifted: false)).commits == ["百"])
         type("MakCheungHei", session)
-        #expect(session.handle(.space).commits == ["MakCheungHei "])
+        #expect(session.handle(.enter).commits == ["MakCheungHei"])
         #expect(startAssociation(session).commits == ["你"])
         #expect(session.handle(.digit(1, shifted: true)).commits == ["們"])
     }

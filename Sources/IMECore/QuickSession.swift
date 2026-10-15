@@ -209,9 +209,24 @@ public final class QuickSession {
 
     private func handleSpace() -> QuickResult {
         guard !isIdle else { return QuickResult(consumed: false) }
-        let text = rawText + " "
-        reset()
-        return QuickResult(consumed: true, commits: [text])
+        if isAssociation {
+            reset()
+            return QuickResult(consumed: true, commits: [" "])
+        }
+        if rawText.count == 1, candidates.indices.contains(selectedIndex) {
+            return select(index: selectedIndex)
+        }
+        if rawText.count <= 2, rawText.allSatisfy({ $0.isASCII && $0.isLetter }) {
+            // 完整雙碼空白只翻頁；單頁或無候選保持原碼及高亮。
+            guard candidates.count > Self.pageSize else {
+                orderLocked = true
+                return QuickResult(consumed: true)
+            }
+            return movePage(step: 1)
+        }
+        // 英文中的空白保留在組字內，統一由 Enter 確認整段原文。
+        startCode(rawText + " ")
+        return QuickResult(consumed: true)
     }
 
     private func handleEnter() -> QuickResult {
