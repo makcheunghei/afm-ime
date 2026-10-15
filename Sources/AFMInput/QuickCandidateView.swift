@@ -28,6 +28,8 @@ struct QuickCandidateView: View {
         visibleItems.filter { $0.index >= visibleStart + max(1, pageSize) }
     }
     private var canPage: Bool { items.count > max(1, pageSize) }
+    private var pageNumber: Int { pageStart / max(1, pageSize) + 1 }
+    private var pageCount: Int { max(1, (items.count + max(1, pageSize) - 1) / max(1, pageSize)) }
     private var fontSize: CGFloat { CGFloat(UserPrefs.candidateFontSize) }
     private var columnWidth: CGFloat {
         let font = NSFont.systemFont(ofSize: fontSize)
@@ -41,6 +43,11 @@ struct QuickCandidateView: View {
                 Text(association ? "聯想" : "候選")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                if canPage {
+                    Text("\(pageNumber)/\(pageCount)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 4)
                 Button(action: onPreviousPage) {
                     Image(systemName: "chevron.left")
@@ -106,12 +113,18 @@ struct QuickCandidateView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(item.text)
-        .accessibilityLabel("\(numberLabel(for: item))，\(item.text)")
+        .help(isOnActivePage(item) ? item.text : "\(item.text)（可直接點選，或先翻頁再用數字鍵選字）")
+        .accessibilityLabel(numberLabel(for: item).isEmpty ? item.text : "\(numberLabel(for: item))，\(item.text)")
+    }
+
+    private func isOnActivePage(_ item: CandidateItem) -> Bool {
+        (pageStart..<pageStart + max(1, pageSize)).contains(item.index)
     }
 
     private func numberLabel(for item: CandidateItem) -> String {
-        let digit = "\(item.index % 9 + 1)"
+        // 展開時同時展示兩頁；數字鍵只對目前頁生效，其他頁不能顯示同一組快捷鍵。
+        guard isOnActivePage(item) else { return item.isAI ? "✦" : "" }
+        let digit = "\(item.index - pageStart + 1)"
         let prefix = association ? "⇧" : ""
         return prefix + digit + (item.isAI ? "✦" : "")
     }
