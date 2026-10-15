@@ -1,8 +1,7 @@
 #!/bin/zsh
 # 打包 .pkg 安装器:build/AFM輸入法-<版本>.pkg
 #   payload = AFM輸入法.app → /Library/Input Methods(系统级,双击 pkg 管理员授权安装)
-#   postinstall = 结束运行中的引擎 → 以控制台用户身份递交 TIS 注册(内部查重)+ 幂等启用(--ensure-enabled,
-#                 已啟用模式保留原狀，只補齊缺少的模式)
+#   postinstall 結束舊引擎並更新正式 App 的登記；不自動啟用輸入來源。
 #   首次安装需注销重登一次完成 TIS 登录扫描收录;之后更新 = 换盘 + 引擎重启,无需注销
 #   签名: 优先自签证书 AFM-IME-Dev,缺失回退 ad-hoc(对外分发需 Developer ID + 公证,见 AGENTS.md)
 set -euo pipefail
@@ -15,8 +14,13 @@ cd "$(dirname "$0")/.."
 }
 python3 - <<'PY'
 from pathlib import Path
-import stat
+import stat, plistlib
 app = Path('build/AFM輸入法.app')
+info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+modes = info['ComponentInputModeDict']['tsInputModeListKey']
+assert len(modes) == 2 and len({m['TISInputSourceID'] for m in modes.values()}) == 2, '輸入模式 ID 必須唯一'
+assert all(not m.get('tsInputModeDefaultStateKey') for m in modes.values()), '來源須由使用者獨立加入，禁止自動補回'
+assert all(not m.get('tsInputModePrimaryInScriptKey') for m in modes.values()), '獨立來源不應強制保留主模式'
 for path in [app, *app.rglob('*')]:
     mode = path.stat().st_mode
     if not mode & stat.S_IROTH or path.is_dir() and not mode & stat.S_IXOTH:
@@ -57,16 +61,17 @@ killall AFMSettings 2>/dev/null || true
 # 舊版使用 AFM拼音.app；新 bundle 已安裝後清理舊路徑，讓升級只保留一份。
 rm -rf "/Library/Input Methods/AFM拼音.app"
 
+# 更新正式位置的 App 登記，避免系統繼續解析建置副本的舊模式宣告。
+# lsregister 更新 App 的位置和描述，不呼叫 TISRegister/TISEnable 或改寫啟用清單。
 CONSOLE_USER=$(stat -f%Su /dev/console)
-USER_UID=$(id -u "$CONSOLE_USER")
-asuser() { launchctl asuser "$USER_UID" sudo -u "$CONSOLE_USER" "$@"; }
+if [ "$CONSOLE_USER" != root ] && [ "$CONSOLE_USER" != loginwindow ]; then
+    USER_UID=$(id -u "$CONSOLE_USER")
+    launchctl asuser "$USER_UID" sudo -u "$CONSOLE_USER" \
+        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -f "$APP" || true
+fi
 
-echo "== TIS 注册(内部查重,已注册自动跳过) =="
-asuser "$BIN" --register-input-source || true
-echo "== 启用(幂等:已启用跳过不碰活视图,未启用 defaults 直写兜底) =="
-asuser "$BIN" --ensure-enabled || true
-
-echo "AFM輸入法已安裝到 /Library/Input Methods。首次安裝請登出再登入一次完成收錄；之後更新無需登出。"
+echo "AFM輸入法已安裝到 /Library/Input Methods。請在系統設定加入所需的 AFM拼音或 AFM速成；更新不會補回已移除的來源。"
 exit 0
 POST
 chmod +x "$PACKAGE_SCRIPTS/postinstall"

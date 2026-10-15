@@ -68,14 +68,14 @@ scripts/test.sh             # Swift Testing 行為測試（包含 CLT framework 
 
 產物 `build/AFM輸入法.app` 包含輸入法引擎及內嵌設定中心（`Contents/PlugIns/AFMSettings.app`），頂層只有一個 App。速成原始資料及生成的詞庫不納入 Git；本地所需檔案與自訂來源參數見 [速成說明](docs/quick.md)。
 
-- **首次安裝**：`open build/AFM輸入法.app` → 設定中心「安裝並啟用」，或執行 `scripts/install.sh`，預設安裝到 `~/Library/Input Methods/AFM輸入法.app`。首次安裝或加入新模式時，系統可能要你**儲存工作後自行登出再登入**；之後執行 `scripts/post-login-check.sh` 完成啟用。
+- **首次安裝**：`open build/AFM輸入法.app` → 設定中心「安裝並啟用」，或執行 `scripts/install.sh`，預設安裝到 `~/Library/Input Methods/AFM輸入法.app`。來源由 macOS 收錄後，在系統設定自行加入所需模式。首次未列出時，系統可能需要登出再登入；`scripts/post-login-check.sh` 只檢查，不改動來源。
 - **切換來源**：macOS 輸入來源列表分別提供「AFM拼音」及「AFM速成」。設定中心「設定」頁有獨立的「繁體速成」選項。
 - **安裝包**：`scripts/make_pkg.sh` 產生 `build/AFM輸入法-<版本>.pkg`，安裝到系統級 `/Library/Input Methods`，由系統要求管理員授權。自用 App 使用本機簽名；目前不包含 Developer ID 公證。
-- **日常更新**：重新執行 package.sh，再從新包的設定中心使用「更新輸入法」；兩個模式已啟用時會保留啟用狀態。命令行亦可使用 `scripts/install.sh`，它會先檢查速成資源，再換盤及補齊缺少的模式，不會先停用所有輸入來源。
+- **日常更新**：重新執行 package.sh，再從新包的設定中心使用「更新輸入法」；安裝包及 `scripts/install.sh` 只更新 App，不註冊、啟用或補回已移除的模式，亦不覆寫系統的啟用清單。
 
 用 `"build/AFM輸入法.app/Contents/MacOS/AFMInput" --status` 可唯讀查閱兩個模式的註冊及啟用狀態；`--check-quick` 不初始化 IMKServer，也不修改系統輸入來源。
 
-註冊請求只遞交一次；如果升級後只有拼音已收錄，會等待登入掃描補齊速成，避免每次重試新增一個拼音副本。系統 API 的實例數可能與設定畫面不同，實際輸入來源請以「系統設定 → 鍵盤 → 輸入方式 → 編輯」核對。封包製作及上游詞庫提取均使用不索引的暫存目錄，完成或失敗後自動清理。
+拼音及速成均不宣告為自動啟用或必須保留的主要模式，可以在系統設定獨立加入及移除。明確使用命令行註冊時，同一份安裝檔只遞交一次；更新檔案後可補註冊，不反覆遞交。系統 API 的實例數可能與設定畫面不同，實際輸入來源請以「系統設定 → 鍵盤 → 輸入方式 → 編輯」核對。封包製作及上游詞庫提取均使用不索引的暫存目錄，完成或失敗後自動清理。
 
 首次安裝後如果新增列表及輸入法選單仍沒有 AFM，須登出再登入，讓 macOS 完成登入掃描；API 顯示已註冊或已設定啟用，不能代替真實選單及切換驗證。輸入法引擎是背景程式；已啟動時再次打開 App 會開啟設定中心，也可直接開啟 App 內的 `Contents/PlugIns/AFMSettings.app`。
 

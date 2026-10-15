@@ -3,6 +3,18 @@ import Testing
 @testable import IMECore
 
 struct InstallerResourceTests {
+    @Test func replacedExecutableAllowsFreshRegistrationWithoutRepeatingSameInstall() throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = IMEInstaller.registrationRequestID(at: root)
+        #expect(first == IMEInstaller.registrationRequestID(at: root))
+        let executable = root.appendingPathComponent("Contents/MacOS/AFMInput")
+        try Data("replacement executable".utf8).write(to: executable, options: .atomic)
+        let replacement = IMEInstaller.registrationRequestID(at: root)
+        #expect(replacement != first)
+        #expect(replacement == IMEInstaller.registrationRequestID(at: root))
+    }
+
     @Test func partialRegistrationDoesNotRegisterPinyinAgain() {
         #expect(!IMEInstaller.registrationIsNeeded(sourceIDs: [IMEInstaller.modeID], requestAlreadySubmitted: false))
         #expect(!IMEInstaller.registrationIsNeeded(sourceIDs: [IMEInstaller.bundleID], requestAlreadySubmitted: false))

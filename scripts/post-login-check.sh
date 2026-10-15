@@ -9,15 +9,5 @@ done
 BIN="$APP/Contents/MacOS/AFMInput"
 "$BIN" --status
 
-if "$BIN" --ensure-enabled; then
-  echo "=== 已收錄！啟用兩種模式並選取拼音 ==="
-  "$BIN" --select-input-source || true
-  open "$APP"
-  echo "完成：按 Ctrl+Space 切換至 AFM拼音，輸入 nihao 測試"
-  echo "亦可在輸入來源選 AFM速成，輸入 aa 測試。"
-else
-  echo "=== 登入掃描未收錄 ==="
-  echo "重新遞交註冊後再登出及登入："
-  echo "  \"$BIN\" --register-input-source"
-  exit 1
-fi
+"$BIN" --check-quick
+echo "本檢查不修改輸入來源。請在系統設定加入所需模式，再自行切換測試。"

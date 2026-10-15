@@ -1,5 +1,5 @@
 #!/bin/bash
-# 安裝 AFM輸入法並由輸入法程式自行註冊(Squirrel/KeyTao 同款流程)
+# 安裝 AFM輸入法；來源由使用者在系統設定管理，更新不補回已刪除來源。
 # 默认用户级 ~/Library/Input Methods(无需 sudo);--system 装系统级(需 sudo)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -29,11 +29,6 @@ xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 # TCC「输入监控」授权随 cdhash 失效,Shift tap 静默失明,见 AGENTS.md 代码签名一节)
 
 "$APP/Contents/MacOS/AFMInput" --quit 2>/dev/null || true
-"$APP/Contents/MacOS/AFMInput" --register-input-source
-if "$APP/Contents/MacOS/AFMInput" --enable-input-source; then
-    "$APP/Contents/MacOS/AFMInput" --select-input-source || true
-    echo "== 安裝完成: $APP =="
-else
-    echo "== App 已安裝並寫入啟用偏好: $APP =="
-    echo "首次安裝或新增速成模式，請儲存工作後自行登出再登入，再執行 scripts/post-login-check.sh。"
-fi
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+echo "== 安裝完成: $APP =="
+echo "請在系統設定 → 鍵盤 → 輸入方式，加入所需的 AFM拼音或 AFM速成。"

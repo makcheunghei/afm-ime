@@ -157,8 +157,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.14</string>
-	<key>CFBundleVersion</key><string>20261014</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15</string>
+	<key>CFBundleVersion</key><string>20261015</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -183,10 +183,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 				<key>tsInputModePaletteIconFileKey</key><string>icon.tiff</string>
 				<key>tsInputModeCharacterRepertoireKey</key>
 				<array><string>Hans</string><string>Latn</string></array>
-				<key>tsInputModeDefaultStateKey</key><true/>
+				<key>tsInputModeDefaultStateKey</key><false/>
 				<key>tsInputModeIsVisibleKey</key><true/>
 				<key>tsInputModeKeyEquivalentModifiersKey</key><integer>4608</integer>
-				<key>tsInputModePrimaryInScriptKey</key><true/>
+				<key>tsInputModePrimaryInScriptKey</key><false/>
 				<key>tsInputModeScriptKey</key><string>smUnicodeScript</string>
 			</dict>
 			<key>moe.bemly.inputmethod.AfmIME.afmquick.hant</key>
@@ -198,10 +198,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 				<key>tsInputModePaletteIconFileKey</key><string>icon.tiff</string>
 				<key>tsInputModeCharacterRepertoireKey</key>
 				<array><string>Hant</string><string>Latn</string></array>
-				<key>tsInputModeDefaultStateKey</key><true/>
+				<key>tsInputModeDefaultStateKey</key><false/>
 				<key>tsInputModeIsVisibleKey</key><true/>
 				<key>tsInputModeKeyEquivalentModifiersKey</key><integer>4608</integer>
-				<key>tsInputModePrimaryInScriptKey</key><true/>
+				<key>tsInputModePrimaryInScriptKey</key><false/>
 				<key>tsInputModeScriptKey</key><string>smUnicodeScript</string>
 			</dict>
 		</dict>
@@ -232,8 +232,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.14</string>
-	<key>CFBundleVersion</key><string>20261014</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15</string>
+	<key>CFBundleVersion</key><string>20261015</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>

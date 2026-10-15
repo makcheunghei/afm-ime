@@ -2,10 +2,10 @@ import AppKit
 import Carbon
 import Foundation
 
-/// 输入法安装/启用/选中(TIS 三连 + defaults 兜底),供输入法 CLI 与安装器 App 共用。
+/// 輸入法安裝／啟用／選中；啟用清單由 macOS 管理，不直接覆寫。
 /// 经验结论(macOS 27 实测):
 /// - TISRegisterInputSource:瞬态注册,持久化靠登录扫描;**对已注册的 bundle 重复调用会多出灰色源实例,必须查重**
-/// - TISEnableInputSource:对 ad-hoc 包返回 noErr 但不落盘 → 需 defaults 直写启用列表
+/// - TISEnableInputSource 的成功回傳不代表已持久化；以系統設定實際結果為準。
 /// - TISSelectInputSource:干净状态下可用;脏状态返回 -50
 /// - 卸载必须先 TISDisableInputSource 停用全部实例,否则 TIS 回写会把启用条目带回来
 public enum IMEInstaller {
@@ -129,12 +129,12 @@ public enum IMEInstaller {
         if !registeredIDs.isEmpty && registeredIDs.count < modeIDs.count {
             let registered = InputMethodMode.allCases.filter { registeredIDs.contains($0.sourceID) }.map(\.displayName)
             let missing = InputMethodMode.allCases.filter { !registeredIDs.contains($0.sourceID) }.map(\.displayName)
-            return "⚠︎ 已收錄 \(registered.joined(separator: "、"))；\(missing.joined(separator: "、")) 尚待收錄，請重新註冊並登出再登入。"
+            return "已收錄 \(registered.joined(separator: "、"))；\(missing.joined(separator: "、")) 尚待系統收錄，請透過系統設定管理所需來源。"
         }
         let registered = registeredIDs.count == modeIDs.count
         let refs = InputMethodMode.allCases.map { enabledRefCount(for: $0) }
         if installed && registered && refs.allSatisfy({ $0 >= 1 }) {
-            return "已安裝並儲存兩種模式的啟用設定；首次安裝若選單未顯示，請登出再登入。"
+            return "已安裝，系統列出兩種模式；請透過系統設定獨立加入或移除來源。"
         }
         if installed && registered { return "已安装未启用 — 点「安装并启用输入法」" }
         if installed { return "已安装,等待 TIS 收录 — 请注销并重新登录一次" }
@@ -175,7 +175,7 @@ public enum IMEInstaller {
         // 升級新增模式時可能只看見舊拼音；重複註冊整個 bundle 會累積拼音副本。
         // TIS 活視圖亦可能延遲，成功遞交的同一路徑及模式組合只遞交一次。
         let target = installedURLs().first ?? bundleURL
-        let request = target.standardizedFileURL.path + "|" + modeIDs.joined(separator: "|")
+        let request = registrationRequestID(at: target)
         let domain = bundleID as CFString
         let previousRequest = CFPreferencesCopyAppValue(registrationRequestKey as CFString, domain) as? String
         let sourceIDs = Set(allSources().map { strProp($0, kTISPropertyInputSourceID) })
@@ -198,6 +198,16 @@ public enum IMEInstaller {
 
     static func registrationIsNeeded(sourceIDs: Set<String>, requestAlreadySubmitted: Bool) -> Bool {
         !requestAlreadySubmitted && sourceIDs.isDisjoint(with: Set(modeIDs + [bundleID]))
+    }
+
+    /// 安裝器更換同路徑的 App 後，舊註冊可能失效；只擋同一份檔案的重試。
+    static func registrationRequestID(at bundleURL: URL) -> String {
+        let executable = bundleURL.appendingPathComponent("Contents/MacOS/AFMInput")
+        let attributes = (try? FileManager.default.attributesOfItem(atPath: executable.path)) ?? [:]
+        let fileID = (attributes[.systemFileNumber] as? NSNumber)?.stringValue ?? "missing"
+        let size = (attributes[.size] as? NSNumber)?.stringValue ?? "missing"
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return ([bundleURL.standardizedFileURL.path, fileID, size, String(modified)] + modeIDs).joined(separator: "|")
     }
 
     /// 等待条件成立(TIS 状态异步传播,立即查询会误报)
@@ -258,13 +268,13 @@ public enum IMEInstaller {
         return log
     }
 
-    /// 逐模式補齊啟用狀態並寫入 defaults；更新時保留已啟用模式。
+    /// 僅在使用者明確要求時，透過系統 API 啟用兩種模式。
     @discardableResult
     public static func enable() -> (ok: Bool, log: String) {
         ensureEnabled()
     }
 
-    /// 幂等啟用(供 .pkg postinstall 等場景):逐一檢查模式，只啟用尚未啟用者。
+    /// 使用者明確要求啟用兩種模式時，逐一透過 TIS API 啟用；安裝及更新不呼叫。
     public static func ensureEnabled() -> (ok: Bool, log: String) {
         guard !allSources().isEmpty else {
             DebugLog.log("無法讀取系統輸入來源，保留啟用偏好")
@@ -273,54 +283,17 @@ public enum IMEInstaller {
         var log = ""
         for mode in InputMethodMode.allCases where enabledRefCount(for: mode) == 0 {
             guard let src = sourceWithID(mode.sourceID) else {
-                log += "⚠︎ TIS 尚未列出 \(mode.displayName)(\(mode.sourceID)),先寫入啟用偏好\n"
+                log += "⚠︎ TIS 尚未列出 \(mode.displayName)(\(mode.sourceID)),請在系統設定加入\n"
                 continue
             }
             let status = TISEnableInputSource(src)
             log += "TISEnableInputSource(\(mode.sourceID)) = \(status)\n"
         }
         let viewOK = waitUpTo(3) { InputMethodMode.allCases.allSatisfy { self.enabledRefCount(for: $0) >= 1 } }
-        let defaultsOK = writeEnabledEntries()
         let enabledOK = InputMethodMode.allCases.allSatisfy { enabledRefCount(for: $0) >= 1 }
         if viewOK { log += "✓ 兩種輸入模式均已啟用\n" }
-        else { log += "啟用偏好已寫入；TIS 活視圖尚未確認兩種模式\n" }
-        log += defaultsOK ? "✓ 已保留現有模式並補齊兩個模式及一條 base 記錄\n" : "✗ defaults 寫入失敗或 TIS 未列出全部模式\n"
-        return (defaultsOK && enabledOK, log)
-    }
-
-    /// defaults 直寫 com.apple.HIToolbox 啟用列表:自家項目整理為兩個 mode 加一條 base。
-    @discardableResult
-    public static func writeEnabledEntries() -> Bool {
-        let allOwnIDs = legacyBundleIDs.union([bundleID]).union(modeIDs)
-        var existing: [[String: Any]] = []
-        if let raw = CFPreferencesCopyAppValue("AppleEnabledInputSources" as CFString, toolboxDomain),
-           let list = (raw as? NSArray) as? [[String: Any]] {
-            existing = list
-        }
-        // 登入期間新增的輸入法可能已在活視圖中，尚未出現在偏好快照；保留正在使用的來源。
-        if let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
-           strProp(current, kTISPropertyInputSourceType) == (kTISTypeKeyboardInputMethodWithoutModes as String) {
-            let currentBundle = strProp(current, kTISPropertyBundleID)
-            if !currentBundle.isEmpty, !allOwnIDs.contains(currentBundle),
-               !existing.contains(where: { ($0["Bundle ID"] as? String) == currentBundle }) {
-                existing.append(["Bundle ID": currentBundle, "InputSourceKind": "Keyboard Input Method"])
-                DebugLog.log("保留現行輸入法：\(currentBundle)")
-            }
-        }
-        let others = existing.filter { !allOwnIDs.contains(($0["Bundle ID"] as? String) ?? "") }
-        // 与系统输入法(SCIM)一致:base(Keyboard Input Method)+ mode(Input Mode)各一条
-        // 编辑器靠 base 渲染标题,mode 才是可切换的输入源;缺 base 会只剩描述没有标题
-        let modeEntries: [[String: Any]] = InputMethodMode.allCases.map { mode in
-            ["Bundle ID": bundleID, "Input Mode": mode.sourceID, "InputSourceKind": "Input Mode"]
-        }
-        let baseEntry: [String: Any] = [
-            "Bundle ID": bundleID,
-            "InputSourceKind": "Keyboard Input Method",
-        ]
-        let next = others + modeEntries + [baseEntry]
-        CFPreferencesSetAppValue("AppleEnabledInputSources" as CFString, next as CFArray, toolboxDomain)
-        CFPreferencesAppSynchronize(toolboxDomain)
-        return InputMethodMode.allCases.allSatisfy { enabledRefCount(for: $0) >= 1 }
+        else { log += "系統尚未確認兩種模式；請在系統設定加入所需來源，啟用清單未被覆寫。\n" }
+        return (enabledOK, log)
     }
 
     @discardableResult
