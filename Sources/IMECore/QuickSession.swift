@@ -2,9 +2,9 @@ import Foundation
 
 /// 速成（Quick）鍵盤狀態機：純 Foundation，不涉及 AppKit／UI。
 ///
-/// 三種狀態：
+/// 英文優先的組字狀態：
 /// - **idle**：無字碼、無聯想窗（`code.isEmpty && !isAssociation`）；特殊鍵全部不 consume，交回 controller。
-/// - **字碼**：1–2 個字母碼。1 碼只有預覽不開窗；第 2 碼自動開窗；第 3 個字母先提交目前選字再開新一碼。
+/// - **組字**：保留原文及大小寫；1–2 字母提供速成候選，第 3 字母起只保留英文，絕不自動選中文。
 /// - **聯想**：選字後顯示續文（`isAssociation`、`code` 為空、無 marked text）。
 ///
 /// 候選與聯想一律經 `QuickEngine` 查表；學習只寫回 `engine.recordSelection`（無字碼可記時不寫）。
@@ -19,6 +19,7 @@ public final class QuickSession {
     private var learning: Bool
 
     public private(set) var code: String = ""
+    public private(set) var rawText: String = ""
     public private(set) var candidates: [String] = []
     public private(set) var selectedIndex: Int = 0
     public private(set) var pageStart: Int = 0
@@ -34,15 +35,8 @@ public final class QuickSession {
         self.learning = learning
     }
 
-    /// 預覽字：聯想態沒有 marked text；有候選用目前選中項，否則用該碼的根 glyph，再退回原碼大寫
-    /// （實測：a → 日；Z 未有單碼候選時預覽 Z）。
-    ///
-    /// 根 glyph 只作 preview；上屏一律用候選文字或實際 code 文字（見 `commitCurrentSelection`）。
-    public var markedText: String {
-        if isAssociation { return "" }
-        if candidates.indices.contains(selectedIndex) { return candidates[selectedIndex] }
-        return engine.roots[code] ?? code.uppercased()
-    }
+    /// 行內只顯示使用者輸入；中文要由數字或點選明確確認。
+    public var markedText: String { isAssociation ? "" : rawText }
 
     // MARK: - 按鍵入口
 
@@ -88,6 +82,7 @@ public final class QuickSession {
     /// 清空全部狀態（取消組字、失焦、模式切換）。generation 只增不減。
     public func reset() {
         code = ""
+        rawText = ""
         candidates = []
         selectedIndex = 0
         pageStart = 0
@@ -98,16 +93,11 @@ public final class QuickSession {
         generation &+= 1
     }
 
-    /// 完成組字：提交現行字碼當頁選字（無候選時提交原碼），不提交聯想；之後清狀態。
+    /// 失焦、標點或模式切換只提交英文原文，不隱式選中文或聯想。
     public func finishComposition() -> String? {
-        if isAssociation {
-            reset()
-            return nil
-        }
-        guard hasActiveCode else { return nil }
-        let committed = commitCurrentSelection(openAssociation: false)
+        let text = rawText
         reset()
-        return committed.first
+        return text.isEmpty ? nil : text
     }
 
     /// 開關變動：現行字碼即時重查表、generation 增、選中項回到當頁首項。
@@ -116,7 +106,7 @@ public final class QuickSession {
         self.fullCharset = fullCharset
         self.learning = learning
         guard hasActiveCode else { return }
-        candidates = engine.candidates(for: code, fullCharset: fullCharset, learning: learning)
+        candidates = chineseCandidates(for: rawText)
         selectedIndex = 0
         pageStart = 0
         aiRecommendation = nil
@@ -151,38 +141,31 @@ public final class QuickSession {
     private func handleLetter(_ character: Character) -> QuickResult {
         guard let letter = Self.letterCode(character) else { return QuickResult(consumed: false) }
 
-        if isAssociation {
-            startCode(letter)
-            return QuickResult(consumed: true)
-        }
-        if code.count >= 2 {
-            // 第 3 個字母：先提交目前選字（無候選時提交原碼），再開新一碼；今次不開前字聯想。
-            let commits = commitCurrentSelection(openAssociation: false)
-            startCode(letter)
-            return QuickResult(consumed: true, commits: commits)
-        }
-        startCode(code + letter)
+        startCode((isAssociation ? "" : rawText) + letter)
         return QuickResult(consumed: true)
     }
 
-    /// 只收 a–z／A–Z，其餘字元交回 controller。
+    /// 只收 ASCII 字母，保留大小寫；查字碼時另作小寫正規化。
     private static func letterCode(_ character: Character) -> String? {
-        let scalars = character.unicodeScalars
-        guard scalars.count == 1, let scalar = scalars.first else { return nil }
-        guard (0x41...0x5A).contains(scalar.value) || (0x61...0x7A).contains(scalar.value) else { return nil }
-        return String(character).lowercased()
+        guard character.isASCII, character.isLetter else { return nil }
+        return String(character)
     }
 
-    private func startCode(_ newCode: String) {
-        code = newCode
-        candidates = engine.candidates(for: newCode, fullCharset: fullCharset, learning: learning)
+    private func chineseCandidates(for text: String) -> [String] {
+        guard (1...2).contains(text.count), text.allSatisfy({ $0.isASCII && $0.isLetter }) else { return [] }
+        return engine.candidates(for: text.lowercased(), fullCharset: fullCharset, learning: learning)
+    }
+
+    private func startCode(_ text: String) {
+        rawText = text
+        code = text.lowercased()
+        candidates = chineseCandidates(for: text)
         selectedIndex = 0
         pageStart = 0
         isAssociation = false
         orderLocked = false
         aiRecommendation = nil
-        // 1 碼只有預覽不開窗；第 2 碼起自動開窗。
-        isCandidateWindowVisible = newCode.count >= 2 && !candidates.isEmpty
+        isCandidateWindowVisible = !candidates.isEmpty
         generation &+= 1
     }
 
@@ -209,14 +192,11 @@ public final class QuickSession {
         // 字碼態 Shift＋數字不處理，留 controller 當符號。
         guard !shifted else { return QuickResult(consumed: false) }
 
-        if value == 0 {
-            // 0 提交目前選中項（不傳 literal 0）。
-            return QuickResult(consumed: true, commits: commitCurrentSelection(openAssociation: true))
-        }
-        guard (1...QuickSession.pageSize).contains(value) else { return QuickResult(consumed: false) }
+        guard (0...9).contains(value) else { return QuickResult(consumed: false) }
         let index = pageStart + value - 1
-        guard candidates.indices.contains(index) else {
-            // 超出本頁的數字：吞鍵但不提交。
+        guard value != 0, candidates.indices.contains(index) else {
+            // 沒有對應中文選項的數字屬於英文原文（例如 abc123、of0）。
+            startCode(rawText + String(value))
             return QuickResult(consumed: true)
         }
         let text = candidates[index]
@@ -228,31 +208,19 @@ public final class QuickSession {
     // MARK: - 空白 / 確定 / 退格 / Esc
 
     private func handleSpace() -> QuickResult {
-        if isAssociation {
-            // 聯想窗 Space：吞鍵、不選第一項、窗照留。
-            return QuickResult(consumed: true)
-        }
-        guard hasActiveCode else { return QuickResult(consumed: false) }
-        // 速成完整碼為兩字母：單碼直接確認；完整雙碼的空白只用於循環翻頁。
-        if code.count == 1 {
-            return QuickResult(consumed: true, commits: commitCurrentSelection(openAssociation: true))
-        }
-        // 只有一頁（或沒有候選）時保留組字與高亮，不提交，也不跳回第一項。
-        guard candidates.count > QuickSession.pageSize else {
-            orderLocked = true
-            return QuickResult(consumed: true)
-        }
-        return movePage(step: 1)
+        guard !isIdle else { return QuickResult(consumed: false) }
+        let text = rawText + " "
+        reset()
+        return QuickResult(consumed: true, commits: [text])
     }
 
     private func handleEnter() -> QuickResult {
         if isAssociation {
-            // 聯想態 Enter 不選字：放行給 controller。
             reset()
             return QuickResult(consumed: false)
         }
-        guard hasActiveCode else { return QuickResult(consumed: false) }
-        return QuickResult(consumed: true, commits: commitCurrentSelection(openAssociation: true))
+        guard let text = finishComposition() else { return QuickResult(consumed: false) }
+        return QuickResult(consumed: true, commits: [text])
     }
 
     private func handleBackspace() -> QuickResult {
@@ -262,8 +230,8 @@ public final class QuickSession {
             reset()
             return QuickResult(consumed: false)
         }
-        // 字碼態一次清全部字碼（不是逐字母退）。
-        reset()
+        let remaining = String(rawText.dropLast())
+        if remaining.isEmpty { reset() } else { startCode(remaining) }
         return QuickResult(consumed: true)
     }
 
@@ -277,7 +245,7 @@ public final class QuickSession {
 
     private func movePage(step: Int) -> QuickResult {
         if isIdle { return QuickResult(consumed: false) }
-        guard !candidates.isEmpty else { return QuickResult(consumed: true) }
+        guard !candidates.isEmpty else { return QuickResult(consumed: false) }
         if isCandidateWindowVisible {
             advancePage(by: step)
         } else {
@@ -300,7 +268,7 @@ public final class QuickSession {
 
     private func moveCandidate(step: Int) -> QuickResult {
         if isIdle { return QuickResult(consumed: false) }
-        guard !candidates.isEmpty else { return QuickResult(consumed: true) }
+        guard !candidates.isEmpty else { return QuickResult(consumed: false) }
         isCandidateWindowVisible = true
         let last = min(pageStart + QuickSession.pageSize, candidates.count) - 1
         var next = selectedIndex + step
@@ -313,22 +281,12 @@ public final class QuickSession {
 
     // MARK: - 提交 / 聯想 / 學習
 
-    /// 提交目前選中候選；無候選時提交實際 code 文字（原樣，不會用 preview 的根 glyph 頂替，亦不丟輸入）。
-    private func commitCurrentSelection(openAssociation: Bool) -> [String] {
-        guard !code.isEmpty else { return [] }
-        let activeCode = code
-        let selectedFromCandidates = candidates.indices.contains(selectedIndex)
-        let text = selectedFromCandidates ? candidates[selectedIndex] : activeCode
-        if selectedFromCandidates { recordLearning(code: activeCode, text: text) }
-        if openAssociation { openAssociations(after: text) }
-        return [text]
-    }
-
     /// 選字後開聯想窗（無聯想資料則完全回到 idle）；聯想窗沒有 marked text、由第 0 頁開始。
     private func openAssociations(after word: String) {
         let list = engine.associations(after: word)
         generation &+= 1
         code = ""
+        rawText = ""
         candidates = list
         selectedIndex = 0
         pageStart = 0
@@ -356,6 +314,13 @@ public enum QuickKey: Equatable {
     case nextPage
     case previousCandidate
     case nextCandidate
+
+    /// charactersIgnoringModifiers 在部分客戶端不含 Shift 的大小寫效果。
+    public static func letterCharacter(_ characters: String, shifted: Bool, capsLock: Bool) -> Character? {
+        guard characters.count == 1, let character = characters.first,
+              character.isASCII, character.isLetter else { return nil }
+        return (shifted != capsLock ? characters.uppercased() : characters.lowercased()).first
+    }
 
     /// 左右固定翻頁、上下選字；Tab 不屬於速成按鍵，交回應用程式。
     public static func navigationKey(keyCode: UInt16) -> QuickKey? {

@@ -33,7 +33,7 @@ struct QuickSessionTests {
         ]
     }
 
-    /// 根 glyph 表（Windows：單碼預覽用根字；z 的根就是 Z）。
+    /// 保留原字典根表作資料 fixture；英文優先模式不以根字取代行內原文。
     private var windowsRoots: [String: String] {
         ["a": "日", "k": "大", "z": "Z"]
     }
@@ -101,23 +101,6 @@ struct QuickSessionTests {
         #expect(QuickKey.digitValue(keyCode: 82, characters: ")", shifted: true) == 0)
     }
 
-    @Test func singleMCodeSpaceImmediatelyCommitsOne() {
-        let (session, _) = makeSession()
-        #expect(type("m", session).consumed)
-        #expect(session.markedText == "一")
-        #expect(!session.isCandidateWindowVisible)
-        let generation = session.generation
-
-        let space = session.handle(.space)
-        #expect(space.consumed)
-        #expect(space.commits == ["一"], "M 預覽一後，只需一次空白便直接上屏")
-        #expect(session.code.isEmpty)
-        #expect(session.markedText.isEmpty)
-        #expect(!session.isCandidateWindowVisible)
-        #expect(session.generation > generation, "確認後舊 AI 請求失效")
-        #expect(!session.handle(.space).consumed, "沒有組字時，普通空白交回應用程式")
-    }
-
     @Test func singleCodeDigitCommitsCandidateWithoutSpace() {
         let (session, _) = makeSession()
         type("a", session)
@@ -126,108 +109,7 @@ struct QuickSessionTests {
         #expect(result.consumed)
     }
 
-    @Test func singleCodeSpaceCommitsSelectionAndOpensAssociations() {
-        let (session, _) = makeSession()
-        type("a", session)
-        #expect(session.markedText == "日")
-        let space = session.handle(.space)
-        #expect(space.commits == ["日"])
-        #expect(session.code.isEmpty)
-        #expect(session.markedText.isEmpty)
-        #expect(session.isAssociation)
-        #expect(session.candidates == ["本", "出"])
-    }
-
-    @Test func singleOCodeSpaceImmediatelyCommitsPerson() {
-        let (session, _) = makeSession()
-        type("o", session)
-        #expect(session.markedText == "人")
-        #expect(session.handle(.space).commits == ["人"])
-        #expect(session.code.isEmpty)
-    }
-
-    // MARK: - 單碼空白確認；雙碼空白循環翻頁
-
-    @Test func doubleCodeSpacePagesAndWrapsWithoutCommitting() {
-        let (session, _) = makeSession()
-        type("aa", session)
-        #expect(session.isCandidateWindowVisible)
-        let generation = session.generation
-
-        let secondPage = session.handle(.space)
-        #expect(secondPage.consumed)
-        #expect(secondPage.commits.isEmpty)
-        #expect(session.code == "aa")
-        #expect(session.pageStart == 9)
-        #expect(session.markedText == "閶")
-        #expect(session.orderLocked)
-        #expect(session.generation == generation)
-
-        let firstPage = session.handle(.space)
-        #expect(firstPage.commits.isEmpty)
-        #expect(session.pageStart == 0)
-        #expect(session.markedText == "昌")
-        #expect(!session.isAssociation)
-        #expect(session.handle(.enter).commits == ["昌"], "完整雙碼以 Enter 確認")
-    }
-
-    @Test func completeOFCodeSpaceCyclesAllPagesWithoutCommitting() {
-        let words = ["伙", "你"] + (2..<80).map { "字\($0)" }
-        let (session, _) = makeSession(candidates: ["of": words])
-        type("of", session)
-        for page in 1...8 {
-            let result = session.handle(.space)
-            #expect(result.consumed)
-            #expect(result.commits.isEmpty)
-            #expect(session.pageStart == page * 9)
-            #expect(session.code == "of")
-        }
-        #expect(session.handle(.space).commits.isEmpty)
-        #expect(session.pageStart == 0, "第九頁之後循環回首頁")
-    }
-
-    @Test func doubleCodeSinglePageSpaceKeepsSelectionAndDoesNotConfirm() {
-        let (session, _) = makeSession()
-        type("of", session)
-        session.handle(.nextCandidate)
-        #expect(session.markedText == "你")
-        for _ in 0..<3 {
-            let result = session.handle(.space)
-            #expect(result.consumed)
-            #expect(result.commits.isEmpty)
-            #expect(session.pageStart == 0)
-            #expect(session.selectedIndex == 1)
-            #expect(session.code == "of")
-            #expect(session.markedText == "你")
-            #expect(session.isCandidateWindowVisible)
-            #expect(!session.isAssociation)
-        }
-        #expect(session.handle(.enter).commits == ["你"])
-    }
-
-    @Test(arguments: [1, 9])
-    func doubleCodeSinglePageSpacePreservesLastCandidate(candidateCount: Int) {
-        let words = (0..<candidateCount).map { "字\($0)" }
-        let (session, _) = makeSession(candidates: ["ab": words])
-        type("ab", session)
-        session.handle(.previousCandidate)
-        #expect(session.selectedIndex == candidateCount - 1)
-        #expect(session.handle(.space).commits.isEmpty)
-        #expect(session.selectedIndex == candidateCount - 1)
-        #expect(session.markedText == words.last)
-        #expect(session.code == "ab")
-    }
-
-    @Test func fullCodeWithoutCandidatesSpaceWaitsForEnter() {
-        let (session, _) = makeSession()
-        type("zz", session)
-        let result = session.handle(.space)
-        #expect(result.consumed)
-        #expect(result.commits.isEmpty)
-        #expect(session.code == "zz")
-        #expect(!session.isCandidateWindowVisible)
-        #expect(session.handle(.enter).commits == ["zz"])
-    }
+    // MARK: - 翻頁
 
     @Test func twoPageCodeWrapsBackToFirstPage() {
         let (session, _) = makeSession()
@@ -239,31 +121,6 @@ struct QuickSessionTests {
         #expect(session.pageStart == 0, "尾頁之後 wrap 首頁")
         #expect(session.handle(.previousPage).consumed)
         #expect(session.pageStart == 9, "首頁之前 wrap 尾頁")
-    }
-
-    // MARK: - 第 3 個字母
-
-    @Test func thirdLetterCommitsSelectionAndStartsNewCodeWithoutAssociation() {
-        let (session, _) = makeSession()
-
-        let third = type("aaa", session)
-        #expect(third.consumed)
-        #expect(third.commits == ["昌"], "第 3 字母先提交目前選字")
-        #expect(session.code == "a")
-        #expect(session.candidates == ["日", "曰"])
-        #expect(session.markedText == "日", "新一碼只有 preview")
-        #expect(!session.isAssociation, "今次不開前字聯想（昌 有聯想資料）")
-        #expect(!session.isCandidateWindowVisible)
-    }
-
-    @Test func thirdLetterCommitsRawCodeWhenNoCandidates() {
-        let (session, _) = makeSession()
-
-        let third = type("zzz", session)
-        #expect(third.commits == ["zz"], "無候選時提交原碼")
-        #expect(session.code == "z")
-        #expect(session.markedText == "Z")
-        #expect(!session.isCandidateWindowVisible)
     }
 
     // MARK: - 聯想
@@ -330,22 +187,6 @@ struct QuickSessionTests {
         #expect(enterSession.candidates == [])
     }
 
-    @Test func associationSpaceIsConsumedWithoutChange() {
-        let (session, _) = makeSession()
-        startAssociation(session)
-        let before = session.candidates
-        let generationBefore = session.generation
-
-        let space = session.handle(.space)
-        #expect(space.consumed)
-        #expect(space.commits.isEmpty)
-        #expect(session.candidates == before)
-        #expect(session.selectedIndex == 0)
-        #expect(session.isAssociation)
-        #expect(session.isCandidateWindowVisible)
-        #expect(session.generation == generationBefore)
-    }
-
     @Test func associationNavigationAndNewLetter() {
         let (session, _) = makeSession()
         startAssociation(session)
@@ -362,7 +203,7 @@ struct QuickSessionTests {
         #expect(session.code == "a")
         #expect(session.candidates == ["日", "曰"])
         #expect(!session.isAssociation)
-        #expect(!session.isCandidateWindowVisible)
+        #expect(session.isCandidateWindowVisible)
     }
 
     @Test func associationEscapeClosesWindow() {
@@ -377,24 +218,6 @@ struct QuickSessionTests {
     }
 
     // MARK: - Backspace / Esc / idle
-
-    @Test func backspaceClearsWholeCodeThenPreviewReturns() {
-        let (session, _) = makeSession()
-        type("aa", session)
-
-        let backspace = session.handle(.backspace)
-        #expect(backspace.consumed)
-        #expect(backspace.commits.isEmpty)
-        #expect(session.code == "")
-        #expect(session.candidates == [])
-        #expect(!session.isCandidateWindowVisible)
-        #expect(session.markedText == "")
-
-        type("a", session)
-        #expect(session.code == "a")
-        #expect(session.markedText == "日", "aa Backspace 後再打 a 是全新一碼")
-        #expect(!session.isCandidateWindowVisible)
-    }
 
     @Test func escapeCancelsCompositionThenIdleEscapeAndSpecialKeysPassThrough() {
         let (session, _) = makeSession()
@@ -429,77 +252,7 @@ struct QuickSessionTests {
         #expect(session.code == "")
     }
 
-    // MARK: - 根 glyph 預覽
-
-    @Test func previewUsesRootGlyphButCommitKeepsTypedCode() {
-        let (session, _) = makeSession()   // k 無候選，根 glyph 大
-
-        #expect(type("k", session).consumed)
-        #expect(session.code == "k")
-        #expect(session.candidates == [])
-        #expect(session.markedText == "大", "無候選時預覽根 glyph")
-        #expect(!session.isCandidateWindowVisible)
-
-        #expect(session.finishComposition() == "k", "無候選提交實際 code 文字，不用 preview glyph 頂替、不丟輸入")
-    }
-
-    @Test func previewFallsBackToUppercasedCode() {
-        let (single, _) = makeSession()
-        type("z", single)
-        #expect(single.markedText == "Z", "root z = Z")
-        #expect(single.finishComposition() == "z")
-
-        let (twoLetters, _) = makeSession()
-        type("zz", twoLetters)
-        #expect(twoLetters.code == "zz")
-        #expect(twoLetters.markedText == "ZZ", "兩字母無候選 → code.uppercased()")
-        #expect(twoLetters.finishComposition() == "zz")
-
-        let (noRoot, _) = makeSession(candidates: ["ab": ["常0"]], roots: [:])
-        type("q", noRoot)
-        #expect(noRoot.markedText == "Q", "字典沒有該根就用原碼大寫")
-        #expect(noRoot.finishComposition() == "q")
-    }
-
-    @Test func thirdLetterRawCodeCommitKeepsTypedCodeNotPreviewGlyph() {
-        let (session, _) = makeSession()
-
-        let third = type("zkz", session)   // zk 無候選（亦無根 glyph）→ 提交實際 code
-        #expect(third.commits == ["zk"])
-        #expect(session.code == "z")
-        #expect(session.markedText == "Z")
-    }
-
     // MARK: - 數字選字
-
-    @Test func digitsSelectWithinPageAndZeroCommitsSelection() {
-        let (session, _) = makeSession()
-        type("of", session)
-
-        let third = session.handle(.digit(3, shifted: false))
-        #expect(third.commits == ["他"])
-        #expect(third.consumed)
-
-        let (zeroSession, _) = makeSession()
-        type("of", zeroSession)
-        zeroSession.handle(.nextCandidate)
-        let zero = zeroSession.handle(.digit(0, shifted: false))
-        #expect(zero.commits == ["你"], "0 提交目前選中項")
-        #expect(zero.consumed)
-        #expect(!zero.commits.contains("0"), "不傳 literal 0")
-    }
-
-    @Test func digitBeyondPageIsConsumedWithoutCommit() {
-        let (session, _) = makeSession()
-        type("of", session)
-
-        let beyond = session.handle(.digit(5, shifted: false))
-        #expect(beyond.consumed)
-        #expect(beyond.commits.isEmpty, "超頁內數字吞鍵不提交")
-        #expect(session.code == "of")
-        #expect(session.markedText == "我")
-        #expect(session.isCandidateWindowVisible)
-    }
 
     @Test func shiftDigitInCodeStateIsLeftToController() {
         let (session, _) = makeSession()
@@ -509,7 +262,7 @@ struct QuickSessionTests {
         #expect(!shifted.consumed, "字碼 Shift＋數字留 controller 當符號")
         #expect(shifted.commits.isEmpty)
         #expect(session.code == "of")
-        #expect(session.markedText == "我")
+        #expect(session.candidates[session.selectedIndex] == "我")
     }
 
     // MARK: - 導航 / 鍵盤翻頁
@@ -520,7 +273,7 @@ struct QuickSessionTests {
 
         #expect(session.handle(.nextCandidate).consumed)
         #expect(session.selectedIndex == 1)
-        #expect(session.markedText == "晶")
+        #expect(session.candidates[session.selectedIndex] == "晶")
         #expect(session.orderLocked)
 
         session.handle(.previousCandidate)
@@ -548,11 +301,11 @@ struct QuickSessionTests {
 
         #expect(session.handle(right).commits.isEmpty)
         #expect(session.pageStart == 9)
-        #expect(session.markedText == "閶")
+        #expect(session.candidates[session.selectedIndex] == "閶")
         session.handle(down)
-        #expect(session.markedText == "閽")
+        #expect(session.candidates[session.selectedIndex] == "閽")
         session.handle(up)
-        #expect(session.markedText == "閶")
+        #expect(session.candidates[session.selectedIndex] == "閶")
         session.handle(right)
         #expect(session.pageStart == 0, "右鍵由尾頁循環回首頁")
         session.handle(left)
@@ -607,12 +360,12 @@ struct QuickSessionTests {
         #expect(session.handle(.nextCandidate).consumed)
         #expect(session.handle(.nextCandidate).consumed)
         #expect(session.selectedIndex == 2)
-        #expect(session.markedText == "𠮷")
-        #expect(session.markedText.unicodeScalars.count == 1)
-        let scalar = try #require(session.markedText.unicodeScalars.first)
+        #expect(session.candidates[session.selectedIndex] == "𠮷")
+        #expect(session.candidates[session.selectedIndex].unicodeScalars.count == 1)
+        let scalar = try #require(session.candidates[session.selectedIndex].unicodeScalars.first)
         #expect(scalar.value > 0xFFFF)
 
-        let enter = session.handle(.enter)
+        let enter = session.select(index: session.selectedIndex)
         #expect(enter.commits == ["𠮷"])
         let committed = try #require(enter.commits.first)
         #expect(committed.utf16.count == 2, "代理對完整保留")
@@ -625,8 +378,8 @@ struct QuickSessionTests {
         for _ in 0..<7 { session.handle(.nextCandidate) }   // 第 2 頁第 8 項
 
         #expect(session.selectedIndex == 16)
-        #expect(session.markedText == "𣊫")
-        #expect(session.handle(.enter).commits == ["𣊫"])
+        #expect(session.candidates[session.selectedIndex] == "𣊫")
+        #expect(session.select(index: session.selectedIndex).commits == ["𣊫"])
     }
 
     // MARK: - 學習
@@ -824,19 +577,6 @@ struct QuickSessionTests {
         #expect(session.select(index: 42).commits.isEmpty)
     }
 
-    @Test func finishCompositionCommitsCurrentPageSelectionAndClearsState() {
-        let (session, _) = makeSession()
-        type("aa", session)
-        session.handle(.nextPage)
-
-        #expect(session.finishComposition() == "閶")
-        #expect(session.code == "")
-        #expect(session.candidates == [])
-        #expect(!session.isCandidateWindowVisible)
-        #expect(!session.isAssociation)
-        #expect(session.finishComposition() == nil, "已無狀態時沒有提交")
-    }
-
     @Test func finishCompositionDoesNotCommitAssociationAndFallsBackToRawCode() {
         let (associationSession, _) = makeSession()
         startAssociation(associationSession)
@@ -847,9 +587,148 @@ struct QuickSessionTests {
 
         let (rawSession, _) = makeSession()
         type("zz", rawSession)
-        #expect(rawSession.markedText == "ZZ", "無候選預覽原碼大寫")
+        #expect(rawSession.markedText == "zz", "行內保留原文")
         #expect(!rawSession.isCandidateWindowVisible)
         #expect(rawSession.finishComposition() == "zz", "無候選提交原碼")
         #expect(rawSession.code == "")
     }
+
+    // MARK: - 英文優先混輸
+
+    @Test(arguments: ["m", "o", "I", "a", "am", "of", "AI", "ma", "zz", "makcheunghei", "MakCheungHei"])
+    func spaceCommitsExactEnglishAndOneSpace(text: String) {
+        let (session, defaults) = makeSession(learning: true)
+        for character in text {
+            #expect(session.handle(.letter(character)).commits.isEmpty)
+        }
+        #expect(session.markedText == text)
+        #expect(session.handle(.space).commits == [text + " "])
+        #expect(session.rawText.isEmpty)
+        #expect(session.candidates.isEmpty)
+        #expect(!session.isAssociation)
+        #expect(!session.handle(.space).consumed)
+        #expect(defaults.dictionary(forKey: QuickPrefs.learningDataKey) == nil)
+    }
+
+    @Test(arguments: ["ma", "Ma", "MA"])
+    func chineseRequiresExplicitDigitOrClick(text: String) {
+        let (session, _) = makeSession(candidates: ["ma": ["百", "頁"]])
+        type(text, session)
+        #expect(session.markedText == text)
+        #expect(session.isCandidateWindowVisible)
+        #expect(session.handle(.digit(1, shifted: false)).commits == ["百"])
+        type(text, session)
+        #expect(session.select(index: 1).commits == ["頁"])
+    }
+
+    @Test func thirdLetterNeverCommitsChineseAndRejectsStaleAI() {
+        let (session, _) = makeSession()
+        type("aa", session)
+        let generation = session.generation
+        #expect(session.handle(.letter("A")).commits.isEmpty)
+        #expect(session.markedText == "aaA")
+        #expect(session.candidates.isEmpty)
+        #expect(!session.isCandidateWindowVisible)
+        #expect(!session.applyRecommendation("晶", generation: generation))
+        #expect(!session.select(index: 0).consumed)
+    }
+
+    @Test func backspaceEditsOneCharacterAndRestoresShortCodeCandidates() {
+        let (session, _) = makeSession()
+        type("aaA", session)
+        #expect(session.handle(.backspace).commits.isEmpty)
+        #expect(session.markedText == "aa")
+        #expect(session.candidates == aaPage1 + aaPage2)
+        #expect(session.isCandidateWindowVisible)
+        session.handle(.backspace)
+        #expect(session.markedText == "a")
+        #expect(session.candidates == ["日", "曰"])
+        session.handle(.backspace)
+        #expect(session.rawText.isEmpty)
+        #expect(!session.handle(.backspace).consumed)
+    }
+
+    @Test func enterAndFinishNeverChooseHighlightedChinese() {
+        let (session, defaults) = makeSession(learning: true)
+        type("AA", session)
+        session.handle(.nextPage)
+        #expect(session.handle(.enter).commits == ["AA"])
+        #expect(!session.handle(.enter).consumed)
+        type("AA", session)
+        session.handle(.nextPage)
+        #expect(session.finishComposition() == "AA")
+        #expect(session.finishComposition() == nil)
+        #expect(defaults.dictionary(forKey: QuickPrefs.learningDataKey) == nil)
+    }
+
+    @Test func arrowsPageWhileSpaceAlwaysCommitsEnglish() {
+        let (session, _) = makeSession()
+        type("aa", session)
+        session.handle(.nextPage)
+        #expect(session.pageStart == 9)
+        #expect(session.markedText == "aa")
+        #expect(session.handle(.space).commits == ["aa "])
+        type("aa", session)
+        session.handle(.nextPage)
+        #expect(session.handle(.digit(1, shifted: false)).commits == ["閶"])
+    }
+
+    @Test func englishDigitsAndZeroRemainLiteral() {
+        let (session, _) = makeSession()
+        type("abc", session)
+        for n in [1, 2, 3, 0] { #expect(session.handle(.digit(n, shifted: false)).commits.isEmpty) }
+        #expect(session.markedText == "abc1230")
+        #expect(session.handle(.space).commits == ["abc1230 "])
+        type("of", session)
+        session.handle(.digit(0, shifted: false))
+        #expect(session.handle(.enter).commits == ["of0"])
+        type("of", session)
+        session.handle(.digit(9, shifted: false))
+        #expect(session.handle(.enter).commits == ["of9"])
+    }
+
+    @Test func arrowsWithoutCandidatesReturnToClientWithoutChangingText() {
+        let (session, _) = makeSession()
+        type("makcheunghei", session)
+        for key: QuickKey in [.previousPage, .nextPage, .previousCandidate, .nextCandidate] {
+            #expect(!session.handle(key).consumed)
+        }
+        #expect(session.finishComposition() == "makcheunghei")
+    }
+
+    @Test func associationSpaceInsertsSpaceAndClosesWindow() {
+        let (session, _) = makeSession()
+        startAssociation(session)
+        #expect(session.handle(.space).commits == [" "])
+        #expect(!session.isAssociation)
+        #expect(session.candidates.isEmpty)
+    }
+
+    @Test func chineseEnglishAndChineseCanAlternate() {
+        let (session, _) = makeSession(candidates: ["ma": ["百"], "of": ["我", "你"]])
+        type("ma", session)
+        #expect(session.handle(.digit(1, shifted: false)).commits == ["百"])
+        type("MakCheungHei", session)
+        #expect(session.handle(.space).commits == ["MakCheungHei "])
+        #expect(startAssociation(session).commits == ["你"])
+        #expect(session.handle(.digit(1, shifted: true)).commits == ["們"])
+    }
+
+    @Test func changingOptionsDuringEnglishDoesNotCreateCandidatesOrChangeCase() {
+        let (session, _) = makeSession()
+        type("MakCheungHei", session)
+        session.updateOptions(fullCharset: true, learning: true)
+        #expect(session.markedText == "MakCheungHei")
+        #expect(session.candidates.isEmpty)
+        #expect(session.finishComposition() == "MakCheungHei")
+    }
+
+    @Test func physicalLetterCaseHandlesShiftAndCapsLock() {
+        #expect(QuickKey.letterCharacter("m", shifted: false, capsLock: false) == "m")
+        #expect(QuickKey.letterCharacter("m", shifted: true, capsLock: false) == "M")
+        #expect(QuickKey.letterCharacter("m", shifted: false, capsLock: true) == "M")
+        #expect(QuickKey.letterCharacter("M", shifted: true, capsLock: true) == "m")
+        #expect(QuickKey.letterCharacter("1", shifted: false, capsLock: false) == nil)
+    }
+
 }

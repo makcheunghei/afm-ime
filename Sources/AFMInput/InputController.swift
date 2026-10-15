@@ -494,8 +494,7 @@ final class InputController: IMKInputController {
         case 53: key = .escape
         case 116, 121, 123...126: key = QuickKey.navigationKey(keyCode: event.keyCode)
         default:
-            if let c = chars.lowercased().first, ("a"..."z").contains(c), !shifted,
-               !modifiers.contains(.capsLock) { key = .letter(c) }
+            if let c = QuickKey.letterCharacter(chars, shifted: shifted, capsLock: modifiers.contains(.capsLock)) { key = .letter(c) }
             else if let n = QuickKey.digitValue(keyCode: event.keyCode, characters: chars, shifted: shifted) {
                 key = .digit(n, shifted: shifted)
             }
@@ -506,13 +505,10 @@ final class InputController: IMKInputController {
             applyQuickResult(result, client: client)
             if result.consumed { scheduleQuickRerank(client); return true }
         }
-        if !session.code.isEmpty || session.isAssociation { finishQuickComposition(client) }
-        if !shifted, let n = Int(chars), (0...9).contains(n), UserPrefs.fullWidthPunct,
-           let scalar = UnicodeScalar(0xFF10 + n), let input = client as? IMKTextInput {
-            input.insertText(NSAttributedString(string: String(scalar)),
-                             replacementRange: NSRange(location: NSNotFound, length: NSNotFound))
-            return true
-        }
+        let hadEnglish = !session.rawText.isEmpty
+        if hadEnglish || session.isAssociation { finishQuickComposition(client) }
+        // 英文組字後的標點、Tab、方向鍵交回應用，保留半角及游標／焦點行為。
+        if hadEnglish { return false }
         return handlePunctuation(effective, composing: false, client: client)
     }
 
@@ -680,7 +676,7 @@ final class InputController: IMKInputController {
     }
 
     override func originalString(_ sender: Any!) -> NSAttributedString! {
-        if inputMode == .quick { return NSAttributedString(string: quickSession?.code ?? "") }
+        if inputMode == .quick { return NSAttributedString(string: quickSession?.rawText ?? "") }
         return NSAttributedString(string: committedBuffer + raw)
     }
 
