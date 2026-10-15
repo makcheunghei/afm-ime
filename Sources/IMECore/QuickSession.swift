@@ -52,6 +52,13 @@ public final class QuickSession {
             return handleEnter()
         case .backspace:
             return handleBackspace()
+        case .forwardDelete:
+            return confirmLiteralComposition()
+        case .separator(let character):
+            guard QuickKey.separatorCharacter(String(character)) != nil else {
+                return QuickResult(consumed: false)
+            }
+            return confirmLiteralComposition(suffix: String(character))
         case .escape:
             return handleEscape()
         case .previousPage:
@@ -213,20 +220,21 @@ public final class QuickSession {
             reset()
             return QuickResult(consumed: true, commits: [" "])
         }
+        if candidates.isEmpty {
+            return confirmLiteralComposition(suffix: " ")
+        }
         if rawText.count == 1, candidates.indices.contains(selectedIndex) {
             return select(index: selectedIndex)
         }
         if rawText.count <= 2, rawText.allSatisfy({ $0.isASCII && $0.isLetter }) {
-            // 完整雙碼空白只翻頁；單頁或無候選保持原碼及高亮。
+            // 有效雙碼空白只翻頁；單頁保持原碼及高亮。
             guard candidates.count > Self.pageSize else {
                 orderLocked = true
                 return QuickResult(consumed: true)
             }
             return movePage(step: 1)
         }
-        // 英文中的空白保留在組字內，統一由 Enter 確認整段原文。
-        startCode(rawText + " ")
-        return QuickResult(consumed: true)
+        return QuickResult(consumed: false)
     }
 
     private func handleEnter() -> QuickResult {
@@ -245,9 +253,18 @@ public final class QuickSession {
             reset()
             return QuickResult(consumed: false)
         }
+        if candidates.isEmpty { return confirmLiteralComposition() }
         let remaining = String(rawText.dropLast())
         if remaining.isEmpty { reset() } else { startCode(remaining) }
         return QuickResult(consumed: true)
+    }
+
+    /// 無中文候選時，分隔符或 Delete 確認英文；第一下 Delete 不刪掉剛輸入的文字。
+    private func confirmLiteralComposition(suffix: String = "") -> QuickResult {
+        guard hasActiveCode, candidates.isEmpty, let text = finishComposition() else {
+            return QuickResult(consumed: false)
+        }
+        return QuickResult(consumed: true, commits: [text + suffix])
     }
 
     private func handleEscape() -> QuickResult {
@@ -324,6 +341,8 @@ public enum QuickKey: Equatable {
     case space
     case enter
     case backspace
+    case forwardDelete
+    case separator(Character)
     case escape
     case previousPage
     case nextPage
@@ -335,6 +354,14 @@ public enum QuickKey: Equatable {
         guard characters.count == 1, let character = characters.first,
               character.isASCII, character.isLetter else { return nil }
         return (shifted != capsLock ? characters.uppercased() : characters.lowercased()).first
+    }
+
+    /// 只把可列印的 ASCII 標點視為英文分隔符；Tab／方向鍵仍交回應用。
+    public static func separatorCharacter(_ characters: String) -> Character? {
+        guard characters.count == 1, let character = characters.first,
+              let scalar = character.unicodeScalars.first,
+              (33...126).contains(scalar.value), !character.isLetter, !character.isNumber else { return nil }
+        return character
     }
 
     /// 左右固定翻頁、上下選字；Tab 不屬於速成按鍵，交回應用程式。

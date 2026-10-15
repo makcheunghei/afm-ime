@@ -231,7 +231,7 @@ struct QuickSessionTests {
         #expect(session.generation > generationBefore, "reset 令 generation 增加")
 
         let idleKeys: [QuickKey] = [
-            .space, .enter, .backspace, .escape,
+            .space, .enter, .backspace, .forwardDelete, .separator("."), .escape,
             .previousPage, .nextPage, .previousCandidate, .nextCandidate,
             .digit(0, shifted: false), .digit(1, shifted: false), .digit(1, shifted: true),
         ]
@@ -633,15 +633,12 @@ struct QuickSessionTests {
         #expect(!session.select(index: 0).consumed)
     }
 
-    @Test func backspaceEditsOneCharacterAndRestoresShortCodeCandidates() {
+    @Test func backspaceStillEditsChineseCodeOneCharacterAtATime() {
         let (session, _) = makeSession()
-        type("aaA", session)
+        type("aa", session)
         #expect(session.handle(.backspace).commits.isEmpty)
-        #expect(session.markedText == "aa")
-        #expect(session.candidates == aaPage1 + aaPage2)
-        #expect(session.isCandidateWindowVisible)
-        session.handle(.backspace)
         #expect(session.markedText == "a")
+        #expect(session.isCandidateWindowVisible)
         #expect(session.candidates == ["日", "曰"])
         session.handle(.backspace)
         #expect(session.rawText.isEmpty)
@@ -700,22 +697,82 @@ struct QuickSessionTests {
         #expect(session.handle(.digit(2, shifted: false)).commits == ["你"])
     }
 
-    @Test func englishSpacesStayInCompositionUntilEnter() {
+    @Test func englishSpaceCommitsImmediatelyAndStartsANewWord() {
         let (session, _) = makeSession()
         type("MakCheungHei", session)
-        #expect(session.handle(.space).commits.isEmpty)
+        #expect(session.handle(.space).commits == ["MakCheungHei "])
+        #expect(session.rawText.isEmpty)
         type("Hello", session)
-        #expect(session.markedText == "MakCheungHei Hello")
-        #expect(session.handle(.enter).commits == ["MakCheungHei Hello"])
+        #expect(session.markedText == "Hello")
+        #expect(session.handle(.enter).commits == ["Hello"])
     }
 
-    @Test(arguments: ["z", "zz"])
-    func spaceWithoutCandidatesKeepsEnglishForEnter(text: String) {
+    @Test(arguments: ["z", "zz", "com", "COM"])
+    func spaceWithoutCandidatesCommitsRawAndSpace(text: String) {
         let (session, _) = makeSession()
         type(text, session)
+        #expect(session.handle(.space).commits == [text + " "])
+        #expect(session.rawText.isEmpty)
+        #expect(!session.handle(.space).consumed)
+    }
+
+    @Test(arguments: [false, true])
+    func deleteConfirmsLiteralAndNextDeleteReturnsToClient(forward: Bool) {
+        let (session, defaults) = makeSession(learning: true)
+        type("com", session)
+        let key: QuickKey = forward ? .forwardDelete : .backspace
+        let result = session.handle(key)
+        #expect(result.consumed)
+        #expect(result.commits == ["com"])
+        #expect(session.markedText.isEmpty)
+        #expect(!session.handle(key).consumed)
+        #expect(defaults.dictionary(forKey: QuickPrefs.learningDataKey) == nil)
+    }
+
+    @Test(arguments: Array(".@/_-+:?&=#%!;,'\""))
+    func punctuationConfirmsLiteralOnceWithoutConvertingItsWidth(character: Character) {
+        let (session, _) = makeSession()
+        type("Com", session)
+        #expect(QuickKey.separatorCharacter(String(character)) == character)
+        let result = session.handle(.separator(character))
+        #expect(result.consumed)
+        #expect(result.commits == ["Com" + String(character)])
+        #expect(session.rawText.isEmpty)
+        #expect(!session.handle(.separator(character)).consumed)
+    }
+
+    @Test func gmailDomainConfirmsWithSpaceDotAndDelete() {
+        for boundary: QuickKey in [.space, .separator("."), .backspace] {
+            let (session, _) = makeSession()
+            var committed = ""
+            type("gmail", session)
+            committed += session.handle(.separator(".")).commits.joined()
+            #expect(committed == "gmail.")
+            type("com", session)
+            committed += session.handle(boundary).commits.joined()
+            let suffix = boundary == .space ? " " : boundary == .separator(".") ? "." : ""
+            #expect(committed == "gmail.com" + suffix)
+            #expect(session.rawText.isEmpty)
+        }
+    }
+
+    @Test func shiftedDigitSymbolCanConfirmEnglishWithoutSelectingChinese() {
+        let (session, _) = makeSession()
+        type("gmail", session)
+        #expect(!session.handle(.digit(2, shifted: true)).consumed)
+        #expect(session.handle(.separator("@")).commits == ["gmail@"])
+    }
+
+    @Test func separatorDoesNotOverrideChineseCandidatesOrSpecialKeys() {
+        let (session, _) = makeSession()
+        type("aa", session)
+        #expect(!session.handle(.separator(".")).consumed)
+        #expect(session.rawText == "aa")
         #expect(session.handle(.space).commits.isEmpty)
-        #expect(session.rawText == text)
-        #expect(session.handle(.enter).commits == [text])
+        #expect(session.pageStart == 9)
+        for text in ["a", "1", " ", "\t", "\r", "中"] {
+            #expect(QuickKey.separatorCharacter(text) == nil)
+        }
     }
 
     @Test func englishDigitsAndZeroRemainLiteral() {

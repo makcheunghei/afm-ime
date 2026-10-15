@@ -932,7 +932,7 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 GlassCard(title: "繁體速成") {
-                    Text("中英混輸：單碼空白出中文字，雙碼空白循環翻頁（單頁不確認）；英文用 Enter 確認。數字或點選選中文，左右鍵亦可翻頁。保留大小寫，Backspace 逐字刪除；Shift＋數字選聯想。")
+                    Text("中英混輸：單碼空白出中文字，雙碼空白循環翻頁（單頁不確認）；無中文候選的英文遇空白、標點或 Delete 立即確認，亦可用 Enter。數字或點選選中文，左右鍵亦可翻頁。保留大小寫，中文字碼 Backspace 逐字刪除；Shift＋數字選聯想。")
                         .font(.callout).foregroundStyle(.secondary)
                     Toggle("完整字集（加入擴展字及其他碼字映射）", isOn: $model.quickFullCharset)
                     Toggle("記住速成選字（只影響速成排序）", isOn: $model.quickLearning)

@@ -491,6 +491,7 @@ final class InputController: IMKInputController {
         case 49: key = .space
         case 36, 76: key = .enter
         case 51: key = .backspace
+        case 117: key = .forwardDelete
         case 53: key = .escape
         case 116, 121, 123...126: key = QuickKey.navigationKey(keyCode: event.keyCode)
         default:
@@ -504,6 +505,14 @@ final class InputController: IMKInputController {
             let result = session.handle(key)
             applyQuickResult(result, client: client)
             if result.consumed { scheduleQuickRerank(client); return true }
+        }
+        // 英文和標點一次提交，避免先結束 marked text 再放行事件時，部分客戶端漏掉分隔符。
+        if let character = QuickKey.separatorCharacter(effective) {
+            let result = session.handle(.separator(character))
+            if result.consumed {
+                applyQuickResult(result, client: client)
+                return true
+            }
         }
         let hadEnglish = !session.rawText.isEmpty
         if hadEnglish || session.isAssociation { finishQuickComposition(client) }
