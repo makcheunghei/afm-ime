@@ -143,7 +143,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261015-halfwidth1"
+    static let buildTag = "20261015-maintenance1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端
@@ -166,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ShiftModeMonitor.start() // Shift 中英切换监听(需输入监控权限,失败会记日志并在 activateServer 重试)
         DebugLog.log("输入法启动 build=\(Self.buildTag): bundle=\(Bundle.main.bundleIdentifier ?? "?") connection=\(connName) debug=\(DebugLog.isDebug) 日志=\(DebugLog.logPath) 词库引擎=\(InputController.engine != nil)")
         DebugLog.log("设置: 英文=\(UserPrefs.englishMode) 模糊=\(UserPrefs.fuzzyPinyin) 全角=\(UserPrefs.fullWidthPunct) FM=\(UserPrefs.fmEnhance) 词频=\(UserPrefs.userFreq) 字号=\(UserPrefs.candidateFontSize)(设置中心写入)")
-        // 直接打开引擎 bundle(未安装态,如从 build/DMG 双击)→ 自动拉起设置中心完成一键安装;
+        // 直接打開未安裝的引擎 bundle 時顯示設定中心；安裝由 .pkg 處理。
         // 已安装后 launchd 按需拉起时 bundle 在安装位置,不会走这一支
         if !IMEInstaller.isBundleInstalled() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in

@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import IMECore
 
-// AFM拼音.app(GUI 控制中心): 安装器 + 词库浏览 + 用户词权重 + 设置,液态玻璃风格。
+// AFM輸入法設定中心：系統維護、詞庫及模型設定。安裝／更新由 .pkg 管理。
 // 写设置走 IME 域(UserDefaults(suiteName: moe.bemly.inputmethod.AfmIME) = 输入法进程的
 // UserDefaults.standard 域),输入法每次按键现读现判,改动即时生效。
 // 键名与 IMECore/UserPrefs.swift 逐字一致——两边都要改。
@@ -17,11 +17,11 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
 
     enum Tab: String, Identifiable, CaseIterable {
-        case install, dict, user, translate, model, test, settings
+        case maintenance, dict, user, translate, model, test, settings
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .install: return "安装"
+            case .maintenance: return "系統維護"
             case .dict: return "词库"
             case .user: return "用户词"
             case .translate: return "翻译"
@@ -32,7 +32,7 @@ final class AppModel: ObservableObject {
         }
         var icon: String {
             switch self {
-            case .install: return "arrow.down.app"
+            case .maintenance: return "wrench.and.screwdriver"
             case .dict: return "character.book.closed"
             case .user: return "person.text.rectangle"
             case .translate: return "translate"
@@ -43,11 +43,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    @Published var tab: Tab = .install
+    @Published var tab: Tab = .maintenance
 
-    // 安装
+    // 系統維護；不複製或刪除 App，不更改詞庫及模型偏好。
     @Published var status = IMEInstaller.statusSummary()
-    @Published var installLog = "首次安装:① 安装并启用 → ② 一键注销 → 重登后即可用;日常更新点「更新输入法」(换盘+重启引擎,秒级)\n\n"
+    @Published var maintenanceLog = ""
+    @Published var maintenanceBusy = false
 
     // 词库
     @Published var dictSearch = "" { didSet { dictPage = 0; reloadDict() } }
@@ -80,7 +81,7 @@ final class AppModel: ObservableObject {
     @Published var fontSize: Double { didSet { write("AFMCandidateFontSize", Int(fontSize)) } }
     // 测试:固定透镜拖拽(droplet-relative-motion 支线移植)——键名与 UserPrefs.dropletFixedLens 逐字一致
     @Published var dropletFixedLens: Bool { didSet { write("AFMDropletFixedLens", dropletFixedLens) } }
-    @Published var confirmUninstall = false
+    @Published var confirmPrepareRemoval = false
     @Published var confirmClear = false
 
     // 快捷键(kb35): IME handle 现读现判,defaults 只存 keyCode(+显示字符免查键码表);
@@ -342,10 +343,6 @@ final class AppModel: ObservableObject {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     }
 
-    var runningFromInstalledLocation: Bool {
-        engineBundleURL.standardizedFileURL.path == IMEInstaller.installedIMEURL().standardizedFileURL.path
-    }
-
     /// 词库数据源: 已装输入法 bundle → 本 helper 的父引擎 bundle → 仓库 Data/(开发)
     private func loadStore() {
         let candidates = [
@@ -465,76 +462,19 @@ final class AppModel: ObservableObject {
         reloadUserRows()
     }
 
-    // MARK: 安装
+    // MARK: 系統維護
 
-    var embeddedIMEURL: URL {
-        engineBundleURL // 合并架构: helper 的父 bundle 即输入法本体
-    }
-
-    func installAndEnable() {
-        var l = "———— 安装并启用 ————\n"
-        if IMEInstaller.isSystemInstalled {
-            l += "本机为系统级安装(/Library/Input Methods,由 .pkg 安装器管理)——GUI 只管用户级安装,更新请安装新 .pkg\n"
-            installLog = l + installLog
-            refreshStatus()
-            return
-        }
-        if runningFromInstalledLocation {
-            l += "本设置中心已运行于安装位置,跳过换盘,直接收敛启用状态\n"
-            l += IMEInstaller.enable().log
-            installLog = l + installLog
-            refreshStatus()
-            return
-        }
-        guard FileManager.default.fileExists(atPath: embeddedIMEURL.path) else {
-            installLog = l + "✗ 找不到引擎 bundle(打包不完整)\n" + installLog
-            return
-        }
-        l += IMEInstaller.install(embeddedIMEURL: embeddedIMEURL)
-        l += IMEInstaller.enable().log
-        l += "若首次安装:点「一键注销」并重新登录,登录扫描收录后永久有效\n"
-        installLog = l + installLog
-        refreshStatus()
-    }
-
-    /// 更新: 从本包 rm+cp 换盘 → killall → 确认死透 → open(部署铁律);
-    /// 运行于安装位置时没有新包可换,提示走重新打包部署
-    func redeploy() {
-        var l = "———— 更新输入法 ————\n"
-        if IMEInstaller.isSystemInstalled {
-            installLog = l + "本机为系统级安装(/Library/Input Methods,由 .pkg 安装器管理)——GUI 换盘只管用户级,更新请安装新 .pkg\n" + installLog
-            return
-        }
-        let dest = IMEInstaller.installedIMEURL()
-        if runningFromInstalledLocation {
-            installLog = l + "本设置中心运行于安装位置,没有新包可换——重新 scripts/package.sh 后替换 bundle 即可\n" + installLog
-            return
-        }
-        guard FileManager.default.fileExists(atPath: embeddedIMEURL.path) else {
-            installLog = l + "✗ 找不到引擎 bundle\n" + installLog
-            return
-        }
-        do {
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try FileManager.default.removeItem(at: dest)
+    func performMaintenance(_ action: SystemMaintenance.Action) {
+        guard !maintenanceBusy else { return }
+        maintenanceBusy = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = SystemMaintenance.perform(action)
+            DispatchQueue.main.async {
+                self.maintenanceLog = (result.ok ? "✓ " : "⚠︎ ") + result.log
+                self.maintenanceBusy = false
+                self.refreshStatus()
             }
-            try FileManager.default.copyItem(at: embeddedIMEURL, to: dest)
-            l += "✓ 已换盘 \(dest.path)\n"
-        } catch {
-            installLog = l + "✗ 换盘失败: \(error.localizedDescription)\n" + installLog
-            return
         }
-        runCmd("/usr/bin/killall", ["AFMInput"])
-        var waited = 0
-        while waited < 20, runCmd("/usr/bin/pgrep", ["-x", "AFMInput"], capture: true) != nil {
-            Thread.sleep(forTimeInterval: 0.1)
-            waited += 1
-        }
-        if waited >= 20 { runCmd("/usr/bin/pkill", ["-9", "-x", "AFMInput"]) }
-        NSWorkspace.shared.open(dest)
-        l += "✓ 引擎已重启(build 见 /tmp/afm-ime.log)\n"
-        installLog = l + installLog
-        refreshStatus()
     }
 
     func openInputSourceSettings() {
@@ -543,37 +483,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func logout() {
-        installLog = (IMEInstaller.requestLogout() ? "———— 已触发注销,重登后输入法自动收录 ————\n" : "✗ 触发失败,请手动注销\n") + installLog
-    }
-
-    func uninstall() {
-        installLog = "———— 卸载 ————\n" + IMEInstaller.uninstall() + installLog
-        refreshStatus()
-    }
-
     func refreshStatus() {
         status = IMEInstaller.statusSummary()
     }
 
-    @discardableResult
-    private func runCmd(_ path: String, _ args: [String], capture: Bool = false) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        if capture {
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = Pipe()
-            do { try p.run() } catch { return nil }
-            p.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)
-        }
-        do { try p.run() } catch { return nil }
-        p.waitUntilExit()
-        return nil
-    }
 }
 
 // MARK: - 根视图(系统液态玻璃 chrome: NavigationSplitView 侧栏自动玻璃,内容从其下滚过)
@@ -597,7 +510,7 @@ struct RootView: View {
         } detail: {
             Group {
                 switch model.tab {
-                case .install: InstallView(model: model)
+                case .maintenance: MaintenanceView(model: model)
                 case .dict: DictView(model: model)
                 case .user: UserWordsView(model: model)
                 case .translate: TranslateView(model: model)
@@ -633,42 +546,59 @@ struct GlassCard<Content: View>: View {
     }
 }
 
-// MARK: - 安装
+// MARK: - 系統維護
 
-struct InstallView: View {
+struct MaintenanceView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "状态") {
+                GlassCard(title: "系統狀態") {
                     Text(model.status).font(.callout)
-                    HStack(spacing: 10) {
-                        Button("安装并启用") { model.installAndEnable() }.buttonStyle(.borderedProminent)
-                        Button("一键注销(仅首次安装需要)") { model.logout() }
-                        Button("卸载", role: .destructive) { model.confirmUninstall = true }
-                    }
-                    .confirmationDialog("卸載 AFM輸入法？", isPresented: $model.confirmUninstall, titleVisibility: .visible) {
-                        Button("卸载", role: .destructive) { model.uninstall() }
-                    } message: {
-                        Text("停用并删除 ~/Library/Input Methods 中的输入法 bundle 与启用条目。")
+                    Text("安裝及更新請使用 AFM輸入法安裝包。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    if model.maintenanceBusy {
+                        ProgressView("正在處理系統配置…").controlSize(.small)
                     }
                 }
-                GlassCard(title: "安装日志") {
-                    Text(model.installLog)
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                GlassCard(title: "重新設定系統配置") {
+                    Text("重新整理系統登記及選單圖示，保留目前啟用的輸入來源、詞庫及模型設定。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Button("重新設定系統配置") { model.performMaintenance(.resetConfiguration) }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.maintenanceBusy)
+                }
+                GlassCard(title: "移除前準備") {
+                    Text("停用 AFM 輸入來源並取消 App 的系統登記，保留 App 檔案及個人設定。準備移除或重新安裝時使用。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Button("預先移除系統註冊…", role: .destructive) { model.confirmPrepareRemoval = true }
+                        .disabled(model.maintenanceBusy)
+                        .confirmationDialog("預先移除 AFM 的系統註冊？", isPresented: $model.confirmPrepareRemoval, titleVisibility: .visible) {
+                            Button("停用並移除註冊", role: .destructive) { model.performMaintenance(.prepareRemoval) }
+                            Button("取消", role: .cancel) { }
+                        } message: {
+                            Text("會先切換至其他鍵盤，再停用 AFM 來源。不會刪除 App、詞庫或模型設定；App 檔案移除前，macOS 仍可能重新收錄輸入法。")
+                        }
+                }
+                if !model.maintenanceLog.isEmpty {
+                    GlassCard(title: "處理結果") {
+                        Text(model.maintenanceLog)
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
                 }
             }
             .padding(16)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.redeploy() } label: { Label("更新输入法", systemImage: "arrow.triangle.2.circlepath") }
+                Button { model.refreshStatus() } label: { Label("重新檢查", systemImage: "arrow.clockwise") }
+                    .disabled(model.maintenanceBusy)
             }
             ToolbarItem {
-                Button { model.openInputSourceSettings() } label: { Label("输入源设置", systemImage: "slider.horizontal.3") }
+                Button { model.openInputSourceSettings() } label: { Label("系統輸入來源設定", systemImage: "slider.horizontal.3") }
             }
         }
     }

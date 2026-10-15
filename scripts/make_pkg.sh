@@ -21,6 +21,11 @@ modes = info['ComponentInputModeDict']['tsInputModeListKey']
 assert len(modes) == 2 and len({m['TISInputSourceID'] for m in modes.values()}) == 2, '輸入模式 ID 必須唯一'
 assert all(not m.get('tsInputModeDefaultStateKey') for m in modes.values()), '來源須由使用者獨立加入，禁止自動補回'
 assert all(not m.get('tsInputModePrimaryInScriptKey') for m in modes.values()), '獨立來源不應強制保留主模式'
+for bundle in (app, app / 'Contents/PlugIns/AFMSettings.app'):
+    metadata = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
+    assert metadata.get('CFBundleName') == metadata.get('CFBundleDisplayName') == 'AFM輸入法', 'App 名稱必須一致'
+    if metadata.get('CFBundleIconName'):
+        assert (bundle / 'Contents/Resources/Assets.car').is_file(), '原生圖示資源缺失，請重新打包'
 for path in [app, *app.rglob('*')]:
     mode = path.stat().st_mode
     if not mode & stat.S_IROTH or path.is_dir() and not mode & stat.S_IXOTH:

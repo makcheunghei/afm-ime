@@ -136,8 +136,8 @@ public enum IMEInstaller {
             return "已安裝，系統已收錄兩種模式；請按需要透過系統設定獨立加入或移除來源。"
         }
         if installed { return "已安装,等待 TIS 收录 — 请注销并重新登录一次" }
-        if registered { return "输入源已注册,app 未安装 — 点「安装并启用输入法」" }
-        return "未安装 — 点「安装并启用输入法」"
+        if registered { return "輸入來源已登記，但未找到 App；請使用 .pkg 安裝包重新安裝。" }
+        return "尚未安裝，請使用 .pkg 安裝包安裝 AFM輸入法。"
     }
 
     /// 註冊標記不代表安裝檔案可用；尤其系統級 App 的資源可能屬於 root。
@@ -363,9 +363,13 @@ public enum IMEInstaller {
         return log
     }
 
-    static func cleanDefaults() {
+    static func clearRegistrationRequest() {
         CFPreferencesSetAppValue(registrationRequestKey as CFString, nil, bundleID as CFString)
         CFPreferencesAppSynchronize(bundleID as CFString)
+    }
+
+    static func cleanDefaults() {
+        clearRegistrationRequest()
         let allIDs = legacyBundleIDs.union([bundleID]).union(modeIDs)
         for key in ["AppleEnabledInputSources", "AppleSelectedInputSources", "AppleInputSourceHistory"] as [CFString] {
             guard let raw = CFPreferencesCopyAppValue(key, toolboxDomain),

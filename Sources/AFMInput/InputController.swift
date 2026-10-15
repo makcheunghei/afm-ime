@@ -204,10 +204,10 @@ final class InputController: IMKInputController {
 
     // MARK: - 输入法菜单(菜单栏输入菜单里的「设置…」入口)
 
-    /// IMK 输入法子菜单:AFM拼音 激活时点菜单栏拼字图标可见
+    /// 兩種輸入模式共用同一個設定中心入口。
     override func menu() -> NSMenu! {
-        let m = NSMenu(title: inputMode.displayName)
-        m.addItem(NSMenuItem(title: "设置…", action: #selector(openSettings(_:)), keyEquivalent: ""))
+        let m = NSMenu(title: "AFM輸入法")
+        m.addItem(NSMenuItem(title: "設定…", action: #selector(openSettings(_:)), keyEquivalent: ""))
         return m
     }
 

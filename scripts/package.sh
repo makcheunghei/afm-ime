@@ -121,10 +121,12 @@ install -m 644 Data/quick.json "$APP/Contents/Resources/quick.json"
 [ -n "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 
 # 輸入源顯示名:TIS 以輸入源 ID 到 InfoPlist.strings 查名稱；兩種 mode 各有本地化名稱。
-# Bundle 名稱由 Info.plist 提供，輸入法選單及系統設定顯示「AFM拼音」和「AFM速成」。
+# 設定選單的本地化名稱亦明確提供實際值，避免顯示 CFBundleName 鍵名。
 for lproj in zh-Hans zh-Hant en; do
   mkdir -p "$APP/Contents/Resources/$lproj.lproj"
   cat > "$APP/Contents/Resources/$lproj.lproj/InfoPlist.strings" <<'STRINGS'
+"CFBundleName" = "AFM輸入法";
+"CFBundleDisplayName" = "AFM輸入法";
 "moe.bemly.inputmethod.AfmIME" = "AFM輸入法";
 "moe.bemly.inputmethod.AfmIME.afmpinyin.hans" = "AFM拼音";
 "moe.bemly.inputmethod.AfmIME.afmquick.hant" = "AFM速成";
@@ -132,12 +134,16 @@ STRINGS
 done
 
 cat > "$APP/Contents/Resources/zh-Hant.lproj/InfoPlist.strings" <<'STRINGS'
+"CFBundleName" = "AFM輸入法";
+"CFBundleDisplayName" = "AFM輸入法";
 "moe.bemly.inputmethod.AfmIME" = "AFM輸入法";
 "moe.bemly.inputmethod.AfmIME.afmpinyin.hans" = "AFM拼音";
 "moe.bemly.inputmethod.AfmIME.afmquick.hant" = "AFM速成";
 STRINGS
 
 cat > "$APP/Contents/Resources/en.lproj/InfoPlist.strings" <<'STRINGS'
+"CFBundleName" = "AFM輸入法";
+"CFBundleDisplayName" = "AFM輸入法";
 "moe.bemly.inputmethod.AfmIME" = "AFM Input Method";
 "moe.bemly.inputmethod.AfmIME.afmpinyin.hans" = "AFM Pinyin";
 "moe.bemly.inputmethod.AfmIME.afmquick.hant" = "AFM Quick";
@@ -156,8 +162,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.8</string>
-	<key>CFBundleVersion</key><string>2026101508</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.9</string>
+	<key>CFBundleVersion</key><string>2026101509</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -219,6 +225,13 @@ PLIST
 # 入口: 输入法菜单「设置…」(InputController.menu) / 未安装态直接打开引擎 bundle 自动拉起。
 HELPER="$APP/Contents/PlugIns/AFMSettings.app"
 mkdir -p "$HELPER/Contents/MacOS" "$HELPER/Contents/Resources"
+for lproj in zh-Hans zh-Hant en; do
+  mkdir -p "$HELPER/Contents/Resources/$lproj.lproj"
+  cat > "$HELPER/Contents/Resources/$lproj.lproj/InfoPlist.strings" <<'STRINGS'
+"CFBundleName" = "AFM輸入法";
+"CFBundleDisplayName" = "AFM輸入法";
+STRINGS
+done
 cp "$BINDIR/afm-app" "$HELPER/Contents/MacOS/AFMSettings"
 cp Data/builtin-user-words.json "$HELPER/Contents/Resources/builtin-user-words.json"  # helper 先启动时也能完成补种
 [ -n "$ICON" ] && cp "$ICON" "$HELPER/Contents/Resources/AppIcon.icns"
@@ -227,15 +240,15 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
+	<key>CFBundleDevelopmentRegion</key><string>zh-Hant</string>
 	<key>CFBundleExecutable</key><string>AFMSettings</string>
 	<key>CFBundleIdentifier</key><string>moe.bemly.AFMSettings</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.8</string>
-	<key>CFBundleVersion</key><string>2026101508</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.9</string>
+	<key>CFBundleVersion</key><string>2026101509</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>
