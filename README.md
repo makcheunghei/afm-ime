@@ -10,7 +10,7 @@
 
 ## 繁體速成
 
-- **單欄候選及鍵盤翻頁**：每頁最多 9 個候選，頂部只顯示目前頁／總頁數（例如 `1/2`）；左右方向鍵翻頁，上下方向鍵移動選項。一碼先預覽，空白立即確認目前字（例如 `M` → 空白 →「一」）；雙碼自動開窗，空白／Enter 確認高亮候選。數字亦可選字，左右方向鍵／Page Down／Page Up 翻頁；沒有展開模式或翻頁按鈕，Tab 交回應用程式。
+- **單欄候選及鍵盤翻頁**：每頁最多 9 個候選，頂部只顯示目前頁／總頁數（例如 `1/2`）；左右方向鍵翻頁，上下方向鍵移動選項。一碼先預覽，空白立即確認目前字（例如 `O` → 空白 →「人」）；雙碼自動開窗，空白循環翻頁，只有一頁時保留目前選項且不確認。Enter／數字確認選字；左右方向鍵／Page Down／Page Up 亦可翻頁；沒有展開模式或翻頁按鈕，Tab 交回應用程式。
 - **原生聯想**：選字後顯示續文，以 Shift＋1–9 選取；聯想提交後關窗，不再自動連鎖開窗。
 - **固定字序為預設**：完整字集及速成個人學習各有獨立開關，預設關閉；學習資料與拼音分開，關閉時不寫入速成學習資料。
 - **速成 AI 預設關閉**：開啟後保留第一候選，推薦放第二位並標記 ✦；導航或翻頁後鎖定本次次序。雲端有另一個獨立開關，未開啟時只使用本機模型。
@@ -74,8 +74,10 @@ scripts/test.sh             # Swift Testing 行為測試（包含 CLT framework 
 
 - **首次安裝**：`open build/AFM輸入法.app` → 設定中心「安裝並啟用」，或執行 `scripts/install.sh`，預設安裝到 `~/Library/Input Methods/AFM輸入法.app`。來源由 macOS 收錄後，在系統設定自行加入所需模式。首次未列出時，系統可能需要登出再登入；`scripts/post-login-check.sh` 只檢查，不改動來源。
 - **切換來源**：macOS 輸入來源列表分別提供「AFM拼音」及「AFM速成」。設定中心「設定」頁有獨立的「繁體速成」選項。
-- **安裝包**：`scripts/make_pkg.sh` 產生 `build/AFM輸入法-<版本>.pkg`，安裝到系統級 `/Library/Input Methods`，由系統要求管理員授權。自用 App 使用本機簽名；目前不包含 Developer ID 公證。
+- **安裝包**：`scripts/make_pkg.sh` 產生 `build/AFM輸入法-<版本>.pkg`，安裝到系統級 `/Library/Input Methods`，由系統要求管理員授權。App 簽署依序優先使用 Developer ID Application、Apple Development、本機開發證書；沒有證書才使用 ad-hoc。安裝包只會使用同一 Team 的 Developer ID Installer；缺少時會明確產生未簽署安裝包。簽署與 Apple 公證分開處理，腳本不會自動提交公證。
 - **日常更新**：重新執行 package.sh，再從新包的設定中心使用「更新輸入法」；安裝包及 `scripts/install.sh` 只更新 App，不註冊、啟用或補回已移除的模式，亦不覆寫系統的啟用清單。
+
+可用 `AFM_SIGN_IDENTITY`（證書名稱或 SHA-1）及 `AFM_SIGN_TEAM` 明確選擇 App 簽署身份，`AFM_INSTALLER_IDENTITY` 選擇安裝包身份。同級證書分屬多個 Team 時會停止要求指定；簽署失敗亦會停止，不會靜默降級。選擇器可用 `bash scripts/test_signing_identities.sh` 及 `zsh scripts/test_signing_identities.sh` 測試。
 
 用 `"build/AFM輸入法.app/Contents/MacOS/AFMInput" --status` 可唯讀查閱兩個模式的註冊及啟用狀態；`--check-quick` 不初始化 IMKServer，也不修改系統輸入來源。
 
@@ -85,7 +87,7 @@ scripts/test.sh             # Swift Testing 行為測試（包含 CLT framework 
 
 ## 使用
 
-- **AFM速成**：切換系統來源後，以 `m`、空白確認「一」；以 `aa`、左右方向鍵測試兩頁候選，再按空白確認當頁高亮字；以 `of`、`2`、Shift＋`1` 測試「你們」。空格在聯想窗不選第一項；普通數字亦不選聯想。Backspace 在組碼時一次取消整個碼，Esc 取消組字或關閉聯想。
+- **AFM速成**：切換系統來源後，以 `o`、空白確認「人」；以 `of`、空白測試循環翻頁，再按 Enter 確認當頁高亮字；以 `of`、`2`、Shift＋`1` 測試「你們」。空格在聯想窗不選第一項；普通數字亦不選聯想。Backspace 在組碼時一次取消整個碼，Esc 取消組字或關閉聯想。
 - 以下為原有 **AFM拼音**及共用快捷鍵：
 - `Ctrl+Space` 或菜单栏切换到 AFM拼音;**轻点 `Shift` 中英切换**(系统级监听、全部应用生效,跨重启记忆;英文模式无候选框、标点半角直通)
 - 中文模式:打拼音 → 数字 `1-8` 选词 / `空格` 上屏高亮候选 / `回车` 上屏拼音原文(网格展开时回车=空格上屏选中);选中候选为透明水滴,**按住左右拖动,松手吸附上屏**(设置中心「测试」可开「固定透镜」模式:水滴钉在原地,整条候选栏从它下面滑过)

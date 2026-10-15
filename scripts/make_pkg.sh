@@ -3,7 +3,7 @@
 #   payload = AFM輸入法.app → /Library/Input Methods(系统级,双击 pkg 管理员授权安装)
 #   postinstall 結束舊引擎並更新正式 App 的登記；不自動啟用輸入來源。
 #   首次安装需注销重登一次完成 TIS 登录扫描收录;之后更新 = 换盘 + 引擎重启,无需注销
-#   签名: 优先自签证书 AFM-IME-Dev,缺失回退 ad-hoc(对外分发需 Developer ID + 公证,见 AGENTS.md)
+#   簽名: 只使用與 App Team 相同的 Developer ID Installer；沒有時產生 unsigned pkg。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -80,21 +80,24 @@ pkgbuild --root "$PACKAGE_ROOT" --scripts "$PACKAGE_SCRIPTS" \
     --identifier "$IDENT" --version "$VERSION" --install-location "/" \
     "$COMPONENT"
 
-SIGN_ID="AFM-IME-Dev"
-security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_ID" || SIGN_ID="-"
-# 签名: productbuild --sign / productsign 要求「installer 签名身份」——自签应用证书(AFM-IME-Dev,
-# EKU=codeSigning)会被拒(实测 2026-09-15);codesign 直接签 flat pkg 是假成功(pkgutil 仍报无签名)。
-# 故 productbuild 先出未签名 product,再试 productsign,失败则保持未签名
-# (本机 sudo installer 可装;对外分发需 Developer ID Installer + 公证)
+# productbuild 先產生 pkg。只能用 Developer ID Installer 簽；明確指定的身份透過
+# AFM_INSTALLER_IDENTITY 傳入，並且必須與 App Team 相同。
 productbuild --package "$COMPONENT" \
     --product "build/AFM輸入法.app/Contents/Info.plist" \
     "$OUT"
-if [ "$SIGN_ID" != "-" ] && productsign --sign "$SIGN_ID" "$OUT" "$OUT.signed" 2>/dev/null; then
+source scripts/signing-identities.sh
+SIGN_IDENTITIES="$(security find-identity -v 2>/dev/null || true)"
+AFM_CERTIFICATE_TEAMS="$(printf '%s\n' "$SIGN_IDENTITIES" | python3 scripts/signing-certificate-teams.py)"
+APP_TEAM="$(codesign -dv --verbose=4 "build/AFM輸入法.app" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -n 1)"
+afm_select_installer_identity "$SIGN_IDENTITIES" "$APP_TEAM" "${AFM_INSTALLER_IDENTITY:-}"
+INSTALLER_ID="$AFM_SELECTED_INSTALLER"
+if [ -n "$INSTALLER_ID" ]; then
+  productsign --sign "$INSTALLER_ID" "$OUT" "$OUT.signed"
   mv "$OUT.signed" "$OUT"
-  echo "pkg 已签名: $SIGN_ID"
+  pkgutil --check-signature "$OUT"
+  echo "pkg 已使用匹配 App Team 的 Developer ID Installer 簽署: $INSTALLER_ID"
 else
-  rm -f "$OUT.signed"
-  echo "!! pkg 未签名(自签证书不被 productsign 接受)——本机可用 sudo installer 安装"
+  echo "!! 找不到與 App Team (${APP_TEAM:-未知}) 匹配的 Developer ID Installer；已產生 unsigned pkg: $OUT" >&2
 fi
 
-echo "打包完成: $OUT (pkg 签名: $([ "$SIGN_ID" != "-" ] && pkgutil --check-signature "$OUT" 2>/dev/null | grep -q "Status: signed" && echo "$SIGN_ID" || echo "无"))"
+echo "打包完成: $OUT"

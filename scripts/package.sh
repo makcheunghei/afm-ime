@@ -22,10 +22,15 @@ if [ ! -s Data/quick.json ] || ! python3 -c 'import json,sys; d=json.load(open(s
   exit 1
 fi
 
-# 签名: 优先自签证书 AFM-IME-Dev(DR=证书绑定,TCC「输入监控」授权跨构建有效,Shift tap 依赖);
-# 证书缺失回退 ad-hoc(DR=cdhash,每次构建变化,授权会失效)。证书生成方法见 AGENTS.md
-SIGN_ID="AFM-IME-Dev"
-security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_ID" || SIGN_ID="-"
+# 簽署身份優先序：Developer ID Application、Apple Development、AFM-IME-Dev、ad-hoc。
+# 可用 AFM_SIGN_IDENTITY 指定憑證名稱或 SHA-1；AFM_SIGN_TEAM 可限定 Team。
+source scripts/signing-identities.sh
+SIGN_IDENTITIES="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+AFM_CERTIFICATE_TEAMS="$(printf '%s\n' "$SIGN_IDENTITIES" | python3 scripts/signing-certificate-teams.py)"
+afm_select_app_identity "$SIGN_IDENTITIES" "${AFM_SIGN_IDENTITY:-}" "${AFM_SIGN_TEAM:-}"
+SIGN_ID="$AFM_SELECTED_IDENTITY"
+SIGN_TEAM="$AFM_SELECTED_TEAM"
+SIGN_KIND="$AFM_SELECTED_KIND"
 
 # 构建: xcodebuild(Xcode 工具链 + macOS 27 SDK,部署基线 macOS 26)。
 # Xcode 缺失/构建失败时回退 swift build(CLT,SDK 同为 27)。
@@ -158,8 +163,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.2</string>
-	<key>CFBundleVersion</key><string>2026101502</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.3</string>
+	<key>CFBundleVersion</key><string>2026101503</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -233,8 +238,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.2</string>
-	<key>CFBundleVersion</key><string>2026101502</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.15.3</string>
+	<key>CFBundleVersion</key><string>2026101503</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>
@@ -244,7 +249,17 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 PLIST
 # 系統級安裝後檔案會屬於 root；靜態 App 資源須可供一般使用者讀取，目錄及程式須可執行。
 chmod -R a+rX "$APP"
-codesign --force --sign "$SIGN_ID" "$HELPER"
-
-codesign --force --sign "$SIGN_ID" "$APP"
-echo "打包完成: $APP (签名: $SIGN_ID, 内含设置中心 helper)"
+SIGN_ARGS=(--force --sign "$SIGN_ID")
+if [ "$SIGN_KIND" = developer-id ]; then
+  SIGN_ARGS+=(--options runtime --timestamp)
+fi
+# 先簽 helper，再簽外層 App；選定憑證後任何簽署或驗證失敗都停止打包。
+codesign "${SIGN_ARGS[@]}" "$HELPER"
+codesign "${SIGN_ARGS[@]}" "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+codesign --verify --strict --verbose=2 "$HELPER"
+if [ "$SIGN_ID" = "-" ]; then
+  echo "打包完成: $APP (ad-hoc 簽署，內含設置中心 helper)"
+else
+  echo "打包完成: $APP (簽署身份: $SIGN_ID, Team: ${SIGN_TEAM:-無}, 內含設置中心 helper)"
+fi

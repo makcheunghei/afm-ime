@@ -15,6 +15,7 @@ struct QuickSessionTests {
         [
             "a": ["日", "曰"],
             "m": ["一"],
+            "o": ["人"],
             "aa": aaPage1 + aaPage2,
             "of": ["我", "你", "他"],
             "za": ["　", "〼", "𠮷"],
@@ -137,44 +138,95 @@ struct QuickSessionTests {
         #expect(session.candidates == ["本", "出"])
     }
 
-    // MARK: - 空白確認字碼；左右鍵翻頁
+    @Test func singleOCodeSpaceImmediatelyCommitsPerson() {
+        let (session, _) = makeSession()
+        type("o", session)
+        #expect(session.markedText == "人")
+        #expect(session.handle(.space).commits == ["人"])
+        #expect(session.code.isEmpty)
+    }
 
-    @Test func secondLetterSpaceConfirmsFirstCandidateWithoutPaging() {
+    // MARK: - 單碼空白確認；雙碼空白循環翻頁
+
+    @Test func doubleCodeSpacePagesAndWrapsWithoutCommitting() {
         let (session, _) = makeSession()
         type("aa", session)
         #expect(session.isCandidateWindowVisible)
-        #expect(session.candidates == aaPage1 + aaPage2)
-        #expect(session.markedText == "昌")
+        let generation = session.generation
 
-        let space = session.handle(.space)
-        #expect(space.consumed)
-        #expect(space.commits == ["昌"], "空白確認首頁高亮候選，不能先跳到閶")
-        #expect(session.code.isEmpty)
-        #expect(session.isAssociation)
-        #expect(session.candidates == ["明", "亮"])
-    }
-
-    @Test func spaceConfirmsNavigatedCandidateOnSecondPage() throws {
-        let (session, _) = makeSession()
-        type("aa", session)
-        session.handle(try #require(QuickKey.navigationKey(keyCode: 124)))
-        session.handle(try #require(QuickKey.navigationKey(keyCode: 125)))
+        let secondPage = session.handle(.space)
+        #expect(secondPage.consumed)
+        #expect(secondPage.commits.isEmpty)
+        #expect(session.code == "aa")
         #expect(session.pageStart == 9)
-        #expect(session.markedText == "閽")
+        #expect(session.markedText == "閶")
+        #expect(session.orderLocked)
+        #expect(session.generation == generation)
 
-        let space = session.handle(.space)
-        #expect(space.consumed)
-        #expect(space.commits == ["閽"])
-        #expect(session.code.isEmpty)
-        #expect(!session.isCandidateWindowVisible)
+        let firstPage = session.handle(.space)
+        #expect(firstPage.commits.isEmpty)
+        #expect(session.pageStart == 0)
+        #expect(session.markedText == "昌")
+        #expect(!session.isAssociation)
+        #expect(session.handle(.enter).commits == ["昌"], "完整雙碼以 Enter 確認")
     }
 
-    @Test func spaceWithoutCandidatesCommitsOriginalCode() {
+    @Test func completeOFCodeSpaceCyclesAllPagesWithoutCommitting() {
+        let words = ["伙", "你"] + (2..<80).map { "字\($0)" }
+        let (session, _) = makeSession(candidates: ["of": words])
+        type("of", session)
+        for page in 1...8 {
+            let result = session.handle(.space)
+            #expect(result.consumed)
+            #expect(result.commits.isEmpty)
+            #expect(session.pageStart == page * 9)
+            #expect(session.code == "of")
+        }
+        #expect(session.handle(.space).commits.isEmpty)
+        #expect(session.pageStart == 0, "第九頁之後循環回首頁")
+    }
+
+    @Test func doubleCodeSinglePageSpaceKeepsSelectionAndDoesNotConfirm() {
+        let (session, _) = makeSession()
+        type("of", session)
+        session.handle(.nextCandidate)
+        #expect(session.markedText == "你")
+        for _ in 0..<3 {
+            let result = session.handle(.space)
+            #expect(result.consumed)
+            #expect(result.commits.isEmpty)
+            #expect(session.pageStart == 0)
+            #expect(session.selectedIndex == 1)
+            #expect(session.code == "of")
+            #expect(session.markedText == "你")
+            #expect(session.isCandidateWindowVisible)
+            #expect(!session.isAssociation)
+        }
+        #expect(session.handle(.enter).commits == ["你"])
+    }
+
+    @Test(arguments: [1, 9])
+    func doubleCodeSinglePageSpacePreservesLastCandidate(candidateCount: Int) {
+        let words = (0..<candidateCount).map { "字\($0)" }
+        let (session, _) = makeSession(candidates: ["ab": words])
+        type("ab", session)
+        session.handle(.previousCandidate)
+        #expect(session.selectedIndex == candidateCount - 1)
+        #expect(session.handle(.space).commits.isEmpty)
+        #expect(session.selectedIndex == candidateCount - 1)
+        #expect(session.markedText == words.last)
+        #expect(session.code == "ab")
+    }
+
+    @Test func fullCodeWithoutCandidatesSpaceWaitsForEnter() {
         let (session, _) = makeSession()
         type("zz", session)
-        #expect(session.handle(.space).commits == ["zz"])
-        #expect(session.code.isEmpty)
+        let result = session.handle(.space)
+        #expect(result.consumed)
+        #expect(result.commits.isEmpty)
+        #expect(session.code == "zz")
         #expect(!session.isCandidateWindowVisible)
+        #expect(session.handle(.enter).commits == ["zz"])
     }
 
     @Test func twoPageCodeWrapsBackToFirstPage() {

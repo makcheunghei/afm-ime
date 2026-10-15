@@ -52,34 +52,55 @@ func checkQuickData() -> Int32 {
         return 1
     }
     let session = QuickSession(engine: engine)
-    _ = session.handle(.letter("m"))
-    guard session.markedText == "一", session.handle(.space).commits == ["一"], session.code.isEmpty else {
-        print("速成 M → 空白 → 一 整合失敗")
-        return 1
+    for (code, expected) in [("m", "一"), ("o", "人")] {
+        session.reset()
+        for letter in code { _ = session.handle(.letter(letter)) }
+        guard session.markedText == expected, session.handle(.space).commits == [expected], session.code.isEmpty else {
+            print("速成單碼空白確認失敗：\(code)")
+            return 1
+        }
     }
     session.reset()
     _ = session.handle(.letter("a"))
     _ = session.handle(.letter("a"))
-    guard session.handle(.space).commits == ["昌"] else {
-        print("速成空白確認首頁候選整合失敗")
-        return 1
-    }
-    session.reset()
-    _ = session.handle(.letter("a"))
-    _ = session.handle(.letter("a"))
-    _ = session.handle(.nextPage)
+    let aaPage = session.handle(.space)
     session.updateOptions(fullCharset: false, learning: false)
-    guard session.handle(.space).commits == ["閶"] else {
-        print("速成翻頁／設定快照／空白確認整合失敗")
+    guard aaPage.consumed, aaPage.commits.isEmpty, session.pageStart == 9,
+          session.handle(.enter).commits == ["閶"] else {
+        print("速成雙碼翻頁／設定快照／Enter 確認失敗")
+        return 1
+    }
+    session.reset()
+    _ = session.handle(.letter("a"))
+    _ = session.handle(.letter("w"))
+    _ = session.handle(.nextCandidate)
+    let selected = session.selectedIndex
+    let onePageText = session.markedText
+    let onePageSpace = session.handle(.space)
+    guard !session.candidates.isEmpty, session.candidates.count <= QuickSession.pageSize,
+          onePageSpace.consumed, onePageSpace.commits.isEmpty, session.code == "aw",
+          session.selectedIndex == selected, session.handle(.enter).commits == [onePageText] else {
+        print("速成單頁雙碼不確認及保留選項失敗")
         return 1
     }
     session.reset()
     _ = session.handle(.letter("o"))
     _ = session.handle(.letter("f"))
-    guard session.handle(.digit(2, shifted: false)).commits == ["你"],
+    let pageCount = (session.candidates.count + QuickSession.pageSize - 1) / QuickSession.pageSize
+    guard pageCount > 1 else { print("OF 候選不足兩頁"); return 1 }
+    for page in 1..<pageCount {
+        let result = session.handle(.space)
+        guard result.consumed, result.commits.isEmpty, session.code == "of",
+              session.pageStart == page * QuickSession.pageSize else {
+            print("速成 OF 空白翻頁失敗")
+            return 1
+        }
+    }
+    guard session.handle(.space).commits.isEmpty, session.pageStart == 0,
+          session.handle(.digit(2, shifted: false)).commits == ["你"],
           session.handle(.digit(1, shifted: true)).commits == ["們"],
           !session.isAssociation else {
-        print("速成聯想提交整合失敗")
+        print("速成 OF 循環翻頁及聯想提交失敗")
         return 1
     }
     let start = Date()
@@ -89,7 +110,7 @@ func checkQuickData() -> Int32 {
         checkedCandidates &+= engine.candidates(for: lookupCodes[index % lookupCodes.count], fullCharset: true).count
     }
     let averageMS = Date().timeIntervalSince(start) * 1000 / 10_000
-    print("速成驗證通過：M 空白確認一、aa 18 字、六組聯想、翻頁確認、聯想提交、完整字集及 Unicode")
+    print("速成驗證通過：O／M 單碼確認、OF 雙碼循環翻頁、單頁保留選項、aa 18 字、六組聯想、完整字集及 Unicode")
     print(String(format: "全字集查表平均 %.4f ms（10,000 次，候選數校驗 %d）", averageMS, checkedCandidates))
     return 0
 }
@@ -97,7 +118,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261015-space-confirm1"
+    static let buildTag = "20261015-space-unified1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端

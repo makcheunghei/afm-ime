@@ -232,9 +232,17 @@ public final class QuickSession {
             // 聯想窗 Space：吞鍵、不選第一項、窗照留。
             return QuickResult(consumed: true)
         }
-        // 字碼態空白立即確認目前候選，包括只有預覽、尚未開窗的一碼。
         guard hasActiveCode else { return QuickResult(consumed: false) }
-        return QuickResult(consumed: true, commits: commitCurrentSelection(openAssociation: true))
+        // 速成完整碼為兩字母：單碼直接確認；完整雙碼的空白只用於循環翻頁。
+        if code.count == 1 {
+            return QuickResult(consumed: true, commits: commitCurrentSelection(openAssociation: true))
+        }
+        // 只有一頁（或沒有候選）時保留組字與高亮，不提交，也不跳回第一項。
+        guard candidates.count > QuickSession.pageSize else {
+            orderLocked = true
+            return QuickResult(consumed: true)
+        }
+        return movePage(step: 1)
     }
 
     private func handleEnter() -> QuickResult {

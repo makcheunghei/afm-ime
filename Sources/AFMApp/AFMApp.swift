@@ -932,7 +932,7 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 GlassCard(title: "繁體速成") {
-                    Text("預設沿用 Windows 候選次序，每頁 9 字；左右鍵翻頁、空白／Enter 確認選字，Shift＋數字選聯想。")
+                    Text("預設沿用 Windows 候選次序，每頁 9 字；單碼空白確認、雙碼空白循環翻頁；Enter 確認選字，Shift＋數字選聯想。")
                         .font(.callout).foregroundStyle(.secondary)
                     Toggle("完整字集（加入擴展字及其他碼字映射）", isOn: $model.quickFullCharset)
                     Toggle("記住速成選字（只影響速成排序）", isOn: $model.quickLearning)
