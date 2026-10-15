@@ -231,7 +231,7 @@ struct QuickSessionTests {
         #expect(session.generation > generationBefore, "reset 令 generation 增加")
 
         let idleKeys: [QuickKey] = [
-            .space, .enter, .backspace, .forwardDelete, .separator("."), .escape,
+            .space, .enter, .backspace, .forwardDelete, .escape,
             .previousPage, .nextPage, .previousCandidate, .nextCandidate,
             .digit(0, shifted: false), .digit(1, shifted: false), .digit(1, shifted: true),
         ]
@@ -738,7 +738,9 @@ struct QuickSessionTests {
         #expect(result.consumed)
         #expect(result.commits == ["Com" + String(character)])
         #expect(session.rawText.isEmpty)
-        #expect(!session.handle(.separator(character)).consumed)
+        let next = session.handle(.separator(character))
+        #expect(next.consumed)
+        #expect(next.commits == [String(character)], "下一個標點不重複前面的英文")
     }
 
     @Test func gmailDomainConfirmsWithSpaceDotAndDelete() {
@@ -763,16 +765,35 @@ struct QuickSessionTests {
         #expect(session.handle(.separator("@")).commits == ["gmail@"])
     }
 
-    @Test func separatorDoesNotOverrideChineseCandidatesOrSpecialKeys() {
-        let (session, _) = makeSession()
+    @Test func punctuationWithChineseCandidatesKeepsTypedLettersAndHalfWidth() {
+        let (session, defaults) = makeSession(learning: true)
         type("aa", session)
-        #expect(!session.handle(.separator(".")).consumed)
-        #expect(session.rawText == "aa")
-        #expect(session.handle(.space).commits.isEmpty)
-        #expect(session.pageStart == 9)
+        let result = session.handle(.separator("."))
+        #expect(result.consumed)
+        #expect(result.commits == ["aa."])
+        #expect(session.rawText.isEmpty)
+        #expect(defaults.dictionary(forKey: QuickPrefs.learningDataKey) == nil)
         for text in ["a", "1", " ", "\t", "\r", "中"] {
             #expect(QuickKey.separatorCharacter(text) == nil)
         }
+    }
+
+    @Test(arguments: Array(".,;:?!()[]{}<>\\`~$_^'\""))
+    func idlePunctuationStaysHalfWidth(character: Character) {
+        let (session, _) = makeSession()
+        let result = session.handle(.separator(character))
+        #expect(result.consumed)
+        #expect(result.commits == [String(character)])
+        #expect(session.markedText.isEmpty)
+    }
+
+    @Test func punctuationAfterChineseSelectionStaysHalfWidthAndClosesAssociation() {
+        let (session, _) = makeSession()
+        #expect(startAssociation(session).commits == ["你"])
+        #expect(session.isAssociation)
+        #expect(session.handle(.separator(".")).commits == ["."])
+        #expect(!session.isAssociation)
+        #expect(session.handle(.separator("'")).commits == ["'"])
     }
 
     @Test func englishDigitsAndZeroRemainLiteral() {

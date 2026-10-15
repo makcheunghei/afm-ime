@@ -58,7 +58,8 @@ public final class QuickSession {
             guard QuickKey.separatorCharacter(String(character)) != nil else {
                 return QuickResult(consumed: false)
             }
-            return confirmLiteralComposition(suffix: String(character))
+            let text = finishComposition() ?? ""
+            return QuickResult(consumed: true, commits: [text + String(character)])
         case .escape:
             return handleEscape()
         case .previousPage:

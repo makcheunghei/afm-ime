@@ -117,6 +117,17 @@ func checkQuickData() -> Int32 {
           session.finishComposition() == "M" else {
         print("中文字碼逐字刪除／結束組字失敗"); return 1
     }
+    session.reset()
+    for character in ".,;:?!()[]{}<>\\`~$_^'\"" {
+        guard session.handle(.separator(character)).commits == [String(character)] else {
+            print("半形標點驗證失敗"); return 1
+        }
+    }
+    for letter in "of" { _ = session.handle(.letter(letter)) }
+    guard session.handle(.digit(2, shifted: false)).commits == ["你"],
+          session.handle(.separator(".")).commits == ["."], !session.isAssociation else {
+        print("中文選字後半形標點驗證失敗"); return 1
+    }
     let start = Date()
     let lookupCodes = ["aa", "of", "ha", "hu", "a", "za", "bu", "ub", "nx", "ux"]
     var checkedCandidates = 0
@@ -124,7 +135,7 @@ func checkQuickData() -> Int32 {
         checkedCandidates &+= engine.candidates(for: lookupCodes[index % lookupCodes.count], fullCharset: true).count
     }
     let averageMS = Date().timeIntervalSince(start) * 1000 / 10_000
-    print("速成驗證通過：英文 Enter 及大小寫、單碼空白出字、雙碼空白翻頁、gmail.com 分隔符／Delete 確認、ma1 選百、中文字碼逐字刪除、aa 18 字、六組聯想、完整字集及 Unicode")
+    print("速成驗證通過：英文 Enter 及大小寫、單碼空白出字、雙碼空白翻頁、gmail.com 分隔符／Delete 確認、半形標點、ma1 選百、中文字碼逐字刪除、aa 18 字、六組聯想、完整字集及 Unicode")
     print(String(format: "全字集查表平均 %.4f ms（10,000 次，候選數校驗 %d）", averageMS, checkedCandidates))
     return 0
 }
@@ -132,7 +143,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261015-literal-boundaries1"
+    static let buildTag = "20261015-halfwidth1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端

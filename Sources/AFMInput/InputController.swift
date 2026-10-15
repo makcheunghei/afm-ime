@@ -506,7 +506,7 @@ final class InputController: IMKInputController {
             applyQuickResult(result, client: client)
             if result.consumed { scheduleQuickRerank(client); return true }
         }
-        // 英文和標點一次提交，避免先結束 marked text 再放行事件時，部分客戶端漏掉分隔符。
+        // 速成的 ASCII 標點固定半形；與待確認原文一次提交，不套用拼音的全形映射。
         if let character = QuickKey.separatorCharacter(effective) {
             let result = session.handle(.separator(character))
             if result.consumed {
@@ -514,11 +514,9 @@ final class InputController: IMKInputController {
                 return true
             }
         }
-        let hadEnglish = !session.rawText.isEmpty
-        if hadEnglish || session.isAssociation { finishQuickComposition(client) }
-        // 英文組字後的標點、Tab、方向鍵交回應用，保留半角及游標／焦點行為。
-        if hadEnglish { return false }
-        return handlePunctuation(effective, composing: false, client: client)
+        if !session.rawText.isEmpty || session.isAssociation { finishQuickComposition(client) }
+        // 數字、Tab、方向鍵等交回應用；速成不使用全形標點設定。
+        return false
     }
 
     private func applyQuickResult(_ result: QuickResult, client: Any!) {
