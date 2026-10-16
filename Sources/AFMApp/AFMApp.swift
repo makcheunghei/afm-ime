@@ -931,10 +931,7 @@ struct AFMControlCenter: App {
         WindowGroup("AFM輸入法") {
             RootView(model: AppModel.shared)
                 .onAppear {
-                    if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-                       let img = NSImage(contentsOf: url) {
-                        NSApp.applicationIconImage = img
-                    }
+                    // 圖示交由系統按 Assets.car 及外觀設定渲染，不能用靜態 NSImage 蓋過染色版本。
                     NSLog("[AFMApp] 启动 v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") 词库=\(AppModel.shared.store != nil ? "已加载" : "未找到")")
                 }
         }

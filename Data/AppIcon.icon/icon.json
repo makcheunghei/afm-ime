@@ -1,0 +1,52 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:0.90000,0.90000,0.91000,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "extended-srgb:0.42000,0.42000,0.44000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": "system-light"
+            },
+            {
+              "appearance": "tinted",
+              "value": "system-light"
+            }
+          ],
+          "image-name": "speed.png",
+          "name": "速",
+          "position": {
+            "scale": 0.74,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "name": "灰玻璃速字",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.6
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

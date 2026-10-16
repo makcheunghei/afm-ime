@@ -99,6 +99,22 @@ if [ -f Data/logo.png ]; then
 
 fi
 
+# 原生分層圖示保留一般／深色／染色外觀；icns 只作舊式顯示位置的後備。
+NATIVE_ICON=""
+if [ -d Data/AppIcon.icon ] && [ -n "$XDEV" ] && [ -d "$XDEV" ]; then
+  NATIVE_ICON="build/native-icon.noindex"
+  mkdir -p "$NATIVE_ICON"
+  DEVELOPER_DIR="$XDEV" xcrun actool --compile "$NATIVE_ICON" \
+    --platform macosx --minimum-deployment-target 26.0 --target-device mac \
+    --app-icon AppIcon --output-partial-info-plist "$NATIVE_ICON/asset-info.plist" \
+    Data/AppIcon.icon
+  [ -s "$NATIVE_ICON/Assets.car" ] && [ -s "$NATIVE_ICON/AppIcon.icns" ] || {
+    echo "!! 原生 App 圖示未完整產生，停止打包" >&2
+    exit 1
+  }
+  ICON="$NATIVE_ICON/AppIcon.icns"
+fi
+
 # 選單列使用獨立的黑／透明「中」模板，保留 22×16 pt 的 1×／2× 表示。
 swift scripts/make_menu_icon.swift build/InputMenuTemplate.tiff
 TISICON="build/InputMenuTemplate.tiff"
@@ -162,8 +178,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.9</string>
-	<key>CFBundleVersion</key><string>2026101509</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.16.1</string>
+	<key>CFBundleVersion</key><string>2026101601</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -247,8 +263,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.15.9</string>
-	<key>CFBundleVersion</key><string>2026101509</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.16.1</string>
+	<key>CFBundleVersion</key><string>2026101601</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>
@@ -256,6 +272,12 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+if [ -n "$NATIVE_ICON" ]; then
+  for bundle in "$APP" "$HELPER"; do
+    cp "$NATIVE_ICON/Assets.car" "$bundle/Contents/Resources/Assets.car"
+    plutil -insert CFBundleIconName -string AppIcon "$bundle/Contents/Info.plist"
+  done
+fi
 # 系統級安裝後檔案會屬於 root；靜態 App 資源須可供一般使用者讀取，目錄及程式須可執行。
 chmod -R a+rX "$APP"
 SIGN_ARGS=(--force --sign "$SIGN_ID")
