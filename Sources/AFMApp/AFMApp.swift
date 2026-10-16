@@ -17,17 +17,17 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
 
     enum Tab: String, Identifiable, CaseIterable {
-        case maintenance, dict, user, translate, model, test, settings
+        case settings, dict, user, translate, model, test, maintenance
         var id: String { rawValue }
         var title: String {
             switch self {
             case .maintenance: return "系統維護"
-            case .dict: return "词库"
-            case .user: return "用户词"
-            case .translate: return "翻译"
-            case .model: return "模型"
-            case .test: return "测试"
-            case .settings: return "设置"
+            case .dict: return "詞庫"
+            case .user: return "個人詞語"
+            case .translate: return "翻譯"
+            case .model: return "AI 模型"
+            case .test: return "實驗功能"
+            case .settings: return "輸入設定"
             }
         }
         var icon: String {
@@ -38,12 +38,19 @@ final class AppModel: ObservableObject {
             case .translate: return "translate"
             case .model: return "cpu"
             case .test: return "flask"
-            case .settings: return "switch.2"
+            case .settings: return "keyboard"
             }
         }
     }
 
-    @Published var tab: Tab = .maintenance
+    @Published var tab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "AFMSettingsLastPane") ?? "") ?? .settings {
+        didSet {
+            UserDefaults.standard.set(tab.rawValue, forKey: "AFMSettingsLastPane")
+            if tab != .settings { stopRecording() }
+        }
+    }
+    @Published var settingsMode: InputSettingsMode = .quick
+    let preview = InputPreviewModel()
 
     // 系統維護；不複製或刪除 App，不更改詞庫及模型偏好。
     @Published var status = IMEInstaller.statusSummary()
@@ -93,9 +100,9 @@ final class AppModel: ObservableObject {
         let custom: Bool      // 是否已被用户改过
     }
     static let hotkeySlots: [(key: String, displayKey: String, fallback: Int, fallbackDisplay: String, title: String)] = [
-        ("AFMHotkeyClipboard", "AFMHotkeyClipboardDisplay", 9, "V", "剪贴板历史(⌃主键)"),
-        ("AFMHotkeyTranslate", "AFMHotkeyTranslateDisplay", 3, "F", "内联翻译(组词中,⌃主键)"),
-        ("AFMHotkeySettings", "AFMHotkeySettingsDisplay", 1, "S", "设置中心(⌃主键)"),
+        ("AFMHotkeyClipboard", "AFMHotkeyClipboardDisplay", 9, "V", "剪貼簿記錄"),
+        ("AFMHotkeyTranslate", "AFMHotkeyTranslateDisplay", 3, "F", "行內翻譯"),
+        ("AFMHotkeySettings", "AFMHotkeySettingsDisplay", 1, "S", "設定中心"),
     ]
     @Published var hotkeyRows: [HotkeyRow] = []
     @Published var recordingHotkey: String? = nil   // 正在录制的槽(nil=未在录)
@@ -107,12 +114,12 @@ final class AppModel: ObservableObject {
         ("openai", "OpenAI", "https://api.openai.com/v1", "openai", "gpt-4o-mini"),
         ("anthropic", "Anthropic", "https://api.anthropic.com", "anthropic", "claude-sonnet-4-5"),
         ("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "openai", "deepseek-chat"),
-        ("kimi", "Kimi(月之暗面)", "https://api.moonshot.cn/v1", "openai", "moonshot-v1-8k"),
-        ("zhipu", "智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "openai", "glm-4-flash"),
-        ("qwen", "通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "openai", "qwen-plus"),
-        ("ark", "豆包(火山方舟)", "https://ark.cn-beijing.volces.com/api/v3", "openai", ""),
-        ("ollama", "Ollama(本机)", "http://127.0.0.1:11434/v1", "openai", ""),
-        ("custom", "自定义", "", "openai", ""),
+        ("kimi", "Kimi（月之暗面）", "https://api.moonshot.cn/v1", "openai", "moonshot-v1-8k"),
+        ("zhipu", "智譜 GLM", "https://open.bigmodel.cn/api/paas/v4", "openai", "glm-4-flash"),
+        ("qwen", "通義千問", "https://dashscope.aliyuncs.com/compatible-mode/v1", "openai", "qwen-plus"),
+        ("ark", "豆包（火山方舟）", "https://ark.cn-beijing.volces.com/api/v3", "openai", ""),
+        ("ollama", "Ollama（本機）", "http://127.0.0.1:11434/v1", "openai", ""),
+        ("custom", "自訂", "", "openai", ""),
     ]
     @Published var cloudEnabled: Bool { didSet { write(ModelPrefs.cloudEnabledKey, cloudEnabled) } }
     @Published var cloudProvider: String { didSet { write(ModelPrefs.cloudProviderKey, cloudProvider); applyCloudPreset() } }
@@ -130,7 +137,7 @@ final class AppModel: ObservableObject {
     @Published var cloudTestResult = ""
     @Published var cloudTesting = false
 
-    /// 选预设 → 自动填接口地址/格式/模型名(自定义不覆盖已填内容)
+    /// 选预设 → 自动填接口地址/格式/模型名(自訂不覆盖已填内容)
     private func applyCloudPreset() {
         guard let p = Self.cloudPresets.first(where: { $0.id == cloudProvider }), !p.baseURL.isEmpty else { return }
         cloudBaseURL = p.baseURL
@@ -172,9 +179,9 @@ final class AppModel: ObservableObject {
             } else {
                 d.set(p.value, forKey: p.key)
             }
-            NSLog("[AFMApp] 提示词应用 \(p.key)(\(blank || p.value == p.def ? "默认" : "自定义"))")
+            NSLog("[AFMApp] 提示词应用 \(p.key)(\(blank || p.value == p.def ? "默认" : "自訂"))")
         }
-        promptAppliedHint = "已应用,输入法即时生效 ✓"
+        promptAppliedHint = "已套用，輸入法即時生效"
     }
 
     /// 全部恢复默认:草稿填回内置默认并立即应用
@@ -193,7 +200,7 @@ final class AppModel: ObservableObject {
     @Published var translating = false
 
     var translateDirection: String {
-        if translateInput.trimmingCharacters(in: .whitespaces).isEmpty { return "自动" }
+        if translateInput.trimmingCharacters(in: .whitespaces).isEmpty { return "自動" }
         let hasCJK = translateInput.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
         return hasCJK ? "中 → 英" : "英 → 中"
     }
@@ -207,12 +214,12 @@ final class AppModel: ObservableObject {
             let out = await FMReranker.shared.translate(text)
             await MainActor.run {
                 translating = false
-                translateResult = out ?? "翻译失败 — 端侧模型不可用或未输出结果"
+                translateResult = out ?? "翻譯未完成，本機模型暫時不可用或未有回應。"
             }
         }
     }
 
-    private static var imeDefaults: UserDefaults {
+    static var imeDefaults: UserDefaults {
         UserDefaults(suiteName: imeDomain) ?? .standard
     }
 
@@ -278,7 +285,7 @@ final class AppModel: ObservableObject {
     func startRecording(_ id: String) {
         stopRecording()
         recordingHotkey = id
-        hotkeyHint = "按下新的快捷键(⌃ + 字母/数字/符号)… Esc 取消"
+        hotkeyHint = "按下 Control＋字母、數字或符號；按 Esc 取消。"
         hotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] ev in
             guard let self, self.recordingHotkey != nil else { return ev }
             self.handleRecordEvent(ev)
@@ -307,14 +314,14 @@ final class AppModel: ObservableObject {
         let mods = ev.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard mods.contains(.control), !mods.contains(.option), !mods.contains(.command), !mods.contains(.shift),
               let display = displayChar(for: ev) else {
-            hotkeyHint = "需要 ⌃ + 单个字母/数字/符号(Option/Command/Shift 组合与功能键不支持),Esc 取消"
+            hotkeyHint = "請按 Control＋單個字母、數字或符號；不支援其他修飾鍵或功能鍵。按 Esc 取消。"
             return
         }
         guard let slot = Self.hotkeySlots.first(where: { $0.key == recordingHotkey }) else {
             stopRecording(); return
         }
         if let dup = Self.hotkeySlots.first(where: { $0.key != slot.key && effectiveCode($0) == Int(ev.keyCode) }) {
-            hotkeyHint = "与「\(dup.title)」冲突,换一个键"
+            hotkeyHint = "與「\(dup.title)」重複，請選另一個按鍵。"
             return
         }
         Self.imeDefaults.set(Int(ev.keyCode), forKey: slot.key)
@@ -353,12 +360,12 @@ final class AppModel: ObservableObject {
         for path in candidates where FileManager.default.fileExists(atPath: path) {
             if let s = try? DictStore(url: URL(fileURLWithPath: path)) {
                 store = s
-                dictStats = "记录 \(s.recordCount) 条 · 音节 \(s.syllables.count) 个 · \(path)"
+                dictStats = "共 \(s.recordCount.formatted()) 條 · \(s.syllables.count.formatted()) 個音節"
                 reloadDict()
                 return
             }
         }
-        dictStats = "未找到 dict.bin — 先安装输入法"
+        dictStats = "未能載入拼音詞庫，請使用安裝包重新安裝 AFM輸入法。"
     }
 
     func reloadDict() {
@@ -387,7 +394,7 @@ final class AppModel: ObservableObject {
         userRows = counts
             .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
             .map { (word, count) in
-                UserRow(id: word, word: word, pinyin: pins[word] ?? "(未记录)",
+                UserRow(id: word, word: word, pinyin: pins[word] ?? "（未記錄）",
                         count: count, score: Int(uf.userScore(count: count)), boost: uf.boost(word))
             }
     }
@@ -420,8 +427,8 @@ final class AppModel: ObservableObject {
     /// 导入的词解除墓碑(显式带回=用户改主意),写完广播引擎重读(kb40)
     func importUsers() {
         let panel = NSOpenPanel()
-        panel.title = "导入用户词"
-        panel.message = "JSON 文件,格式同内置用户词种子:{\"version\":1,\"words\":[{\"word\":\"词\",\"pinyin\":\"pin yin\",\"count\":3}]}"
+        panel.title = "匯入個人詞語"
+        panel.message = "JSON 檔案，格式與內置個人詞語相同：{\"version\":1,\"words\":[{\"word\":\"词\",\"pinyin\":\"pin yin\",\"count\":3}]}"
         panel.allowedContentTypes = [.json]
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -429,7 +436,7 @@ final class AppModel: ObservableObject {
         guard let data = try? Data(contentsOf: url),
               let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let items = doc["words"] as? [[String: Any]] else {
-            userMessage = "导入失败:不是有效的用户词 JSON(缺 words 数组或格式不对)"
+            userMessage = "匯入失敗：JSON 格式不正確或缺少 words 陣列。"
             return
         }
         var counts = Self.imeDefaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
@@ -458,7 +465,7 @@ final class AppModel: ObservableObject {
         UserFreq.untombstone(words: importedWords, defaults: Self.imeDefaults)
         UserFreq.postExternalChange()
         NSLog("[AFMApp] 导入用户词: 新增 \(added) 更新 \(updated) 跳过 \(skipped)(源 \(url.lastPathComponent))")
-        userMessage = "导入完成:新增 \(added) 条、更新 \(updated) 条\(skipped > 0 ? "、跳过非法 \(skipped) 条" : "")(共 \(counts.count) 条)"
+        userMessage = "匯入完成：新增 \(added) 條、更新 \(updated) 條\(skipped > 0 ? "、略過無效資料 \(skipped) 條" : "")；共 \(counts.count) 條。"
         reloadUserRows()
     }
 
@@ -487,454 +494,4 @@ final class AppModel: ObservableObject {
         status = IMEInstaller.statusSummary()
     }
 
-}
-
-// MARK: - 根视图(系统液态玻璃 chrome: NavigationSplitView 侧栏自动玻璃,内容从其下滚过)
-
-struct RootView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        NavigationSplitView {
-            List(selection: sidebarSelection) {
-                ForEach(AppModel.Tab.allCases) { tab in
-                    Label(tab.title, systemImage: tab.icon).tag(tab)
-                }
-                Section {
-                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(176)
-        } detail: {
-            Group {
-                switch model.tab {
-                case .maintenance: MaintenanceView(model: model)
-                case .dict: DictView(model: model)
-                case .user: UserWordsView(model: model)
-                case .translate: TranslateView(model: model)
-                case .model: ModelView(model: model)
-                case .test: TestView(model: model)
-                case .settings: SettingsView(model: model)
-                }
-            }
-            .navigationTitle(model.tab.title)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .frame(minWidth: 600, minHeight: 440)
-        }
-    }
-
-    private var sidebarSelection: Binding<AppModel.Tab?> {
-        Binding(get: { model.tab }, set: { if let t = $0 { model.tab = t } })
-    }
-}
-
-/// 液态玻璃区块卡片(原生 glassEffect;材质底上叠加,暗亮色自适应)
-struct GlassCard<Content: View>: View {
-    var title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
-    }
-}
-
-// MARK: - 系統維護
-
-struct MaintenanceView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "系統狀態") {
-                    Text(model.status).font(.callout)
-                    Text("安裝及更新請使用 AFM輸入法安裝包。")
-                        .font(.callout).foregroundStyle(.secondary)
-                    if model.maintenanceBusy {
-                        ProgressView("正在處理系統配置…").controlSize(.small)
-                    }
-                }
-                GlassCard(title: "重新設定系統配置") {
-                    Text("重新整理系統登記及選單圖示，保留目前啟用的輸入來源、詞庫及模型設定。")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Button("重新設定系統配置") { model.performMaintenance(.resetConfiguration) }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.maintenanceBusy)
-                }
-                GlassCard(title: "移除前準備") {
-                    Text("停用 AFM 輸入來源並取消 App 的系統登記，保留 App 檔案及個人設定。準備移除或重新安裝時使用。")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Button("預先移除系統註冊…", role: .destructive) { model.confirmPrepareRemoval = true }
-                        .disabled(model.maintenanceBusy)
-                        .confirmationDialog("預先移除 AFM 的系統註冊？", isPresented: $model.confirmPrepareRemoval, titleVisibility: .visible) {
-                            Button("停用並移除註冊", role: .destructive) { model.performMaintenance(.prepareRemoval) }
-                            Button("取消", role: .cancel) { }
-                        } message: {
-                            Text("會先切換至其他鍵盤，再停用 AFM 來源。不會刪除 App、詞庫或模型設定；App 檔案移除前，macOS 仍可能重新收錄輸入法。")
-                        }
-                }
-                if !model.maintenanceLog.isEmpty {
-                    GlassCard(title: "處理結果") {
-                        Text(model.maintenanceLog)
-                            .font(.callout)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.refreshStatus() } label: { Label("重新檢查", systemImage: "arrow.clockwise") }
-                    .disabled(model.maintenanceBusy)
-            }
-            ToolbarItem {
-                Button { model.openInputSourceSettings() } label: { Label("系統輸入來源設定", systemImage: "slider.horizontal.3") }
-            }
-        }
-    }
-}
-
-// MARK: - 词库
-
-struct DictView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                if model.dictSearch.isEmpty {
-                    Button("‹ 上一页") { if model.dictPage > 0 { model.dictPage -= 1 } }
-                        .disabled(model.dictPage == 0)
-                    Text("第 \(model.dictPage + 1) / \(model.dictPageCount) 页").font(.caption).foregroundStyle(.secondary)
-                    Button("下一页 ›") { if model.dictPage < model.dictPageCount - 1 { model.dictPage += 1 } }
-                        .disabled(model.dictPage >= model.dictPageCount - 1)
-                } else {
-                    Text("搜索到 \(model.dictRows.count) 条(显示前 80)").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(model.dictStats).font(.caption).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16).padding(.top, 8)
-
-            List(Array(model.dictRows.prefix(80).enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 12) {
-                    Text(row.word).font(.system(size: 15, weight: .medium)).frame(minWidth: 90, alignment: .leading)
-                    Text(row.key).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
-                    Spacer()
-                    Text("权重 \(row.weight)").font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            .listStyle(.inset)
-            .padding(.horizontal, 10)
-        }
-        .searchable(text: $model.dictSearch, placement: .toolbar, prompt: "拼音前缀,如 nihao / nh / meibeng")
-    }
-}
-
-// MARK: - 用户词
-
-struct UserWordsView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("共 \(model.userRows.count) 条 · 用户词处于最高优先档(用户 2 > 全键 1 > 渐进 0),打分 = 2万 + 1.5万·log10(1+次数),词频乘数 = min(1 + 0.5·log10(1+次数), ×3) 仅 ≥2 字词")
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 16).padding(.top, 8)
-
-            List {
-                ForEach(model.userRows) { row in
-                    HStack(spacing: 12) {
-                        Text(row.word).font(.system(size: 15, weight: .medium)).frame(minWidth: 90, alignment: .leading)
-                        Text(row.pinyin).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(row.count) 次").font(.caption).foregroundStyle(.secondary)
-                        Text("档内分 \(row.score)").font(.caption).foregroundStyle(.secondary)
-                        Text(String(format: "×%.2f", row.boost)).font(.caption).foregroundStyle(.tertiary)
-                    }
-                    .contextMenu {
-                        Button("删除「\(row.word)」", role: .destructive) { model.deleteUser(row.word) }
-                    }
-                }
-            }
-            .listStyle(.inset)
-            .padding(.horizontal, 10)
-            Text("右键条目可删除 · 上屏自动学习(词组学习:分段组句整词组入词库)")
-                .font(.caption2).foregroundStyle(.tertiary).padding(.horizontal, 16)
-            if !model.userMessage.isEmpty {
-                Text(model.userMessage)
-                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.importUsers() } label: { Label("导入用户词…", systemImage: "square.and.arrow.down") }
-            }
-            ToolbarItem {
-                Button { model.confirmClear = true } label: { Label("清空全部", systemImage: "trash") }
-                    .disabled(model.userRows.isEmpty)
-            }
-            ToolbarItem {
-                Button { model.reloadUserRows() } label: { Label("刷新", systemImage: "arrow.clockwise") }
-            }
-        }
-        .confirmationDialog("清空全部用户词与词频?", isPresented: $model.confirmClear, titleVisibility: .visible) {
-            Button("清空", role: .destructive) { model.clearUsers() }
-        }
-    }
-}
-
-// MARK: - 翻译(端侧 FM,中↔英方向自动)
-
-struct TranslateView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "翻译 · \(model.translateDirection)") {
-                    TextEditor(text: $model.translateInput)
-                        .font(.system(size: 14))
-                        .frame(height: 110)
-                        .padding(6)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.05)))
-                        .overlay(alignment: .bottomTrailing) {
-                            if !model.translateInput.isEmpty {
-                                Button {
-                                    model.translateInput = ""
-                                    model.translateResult = ""
-                                } label: { Image(systemName: "xmark.circle.fill") }
-                                    .buttonStyle(.plain).foregroundStyle(.tertiary)
-                                    .padding(6)
-                            }
-                        }
-                    HStack(spacing: 10) {
-                        Button(model.translating ? "翻译中…" : "翻译 ⏎") { model.submitTranslate() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.translating || model.translateInput.trimmingCharacters(in: .whitespaces).isEmpty)
-                        if model.translating { ProgressView().controlSize(.small) }
-                        Spacer()
-                        if !model.translateResult.isEmpty {
-                            Button {
-                                let pb = NSPasteboard.general
-                                pb.clearContents()
-                                pb.setString(model.translateResult, forType: .string)
-                            } label: { Label("复制", systemImage: "doc.on.doc") }
-                        }
-                    }
-                    if !model.translateResult.isEmpty {
-                        Text(model.translateResult)
-                            .font(.system(size: 15))
-                            .textSelection(.enabled)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.05)))
-                    }
-                    Text("端侧 Apple 模型,隐私安全(不上云);方向自动识别;输入后按 ⏎ 翻译")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(16)
-        }
-        .onSubmit { model.submitTranslate() }
-    }
-}
-
-// MARK: - 模型(kb36:云端模型 Provider 接入 + FM 提示词编辑)
-
-struct ModelView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "云端模型(启用后替代端侧 FM,失败自动回落)") {
-                    Toggle("拼音使用雲端模型", isOn: $model.cloudEnabled)
-                    Picker("提供商", selection: $model.cloudProvider) {
-                        ForEach(AppModel.cloudPresets, id: \.id) { p in
-                            Text(p.name).tag(p.id)
-                        }
-                    }
-                    Picker("接口格式", selection: $model.cloudFormat) {
-                        Text("OpenAI 兼容(/chat/completions)").tag("openai")
-                        Text("Anthropic(/v1/messages)").tag("anthropic")
-                    }
-                    TextField("接口地址 Base URL(如 https://api.deepseek.com/v1)", text: $model.cloudBaseURL)
-                    SecureField("API Key", text: $model.cloudAPIKey)
-                    TextField("模型名(如 deepseek-chat)", text: $model.cloudModel)
-                    HStack(spacing: 10) {
-                        Button(model.cloudTesting ? "测试中…" : "测试连接") { model.testCloud() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.cloudTesting || model.cloudBaseURL.isEmpty || model.cloudModel.isEmpty)
-                        if model.cloudTesting { ProgressView().controlSize(.small) }
-                        Spacer()
-                    }
-                    if !model.cloudTestResult.isEmpty {
-                        Text(model.cloudTestResult)
-                            .font(.callout)
-                            .textSelection(.enabled)
-                    }
-                    Text("请求结构沿用 fm 框架:提示词=系统消息(instructions),请求体=用户消息(prompt),由 FoundationModels Provider 协议的 Executor 转换。密钥明文存本机 IME 域;远程地址仅支持 https(本机 http 如 Ollama 可用);启用后组词上文与拼音会发送到所选服务商,注重隐私请勿启用。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .disabled(!ModelPrefs.supportsCloudModels)
-                if !ModelPrefs.supportsCloudModels {
-                    Text("雲端 AI 需要 macOS 27 或以上；macOS 26 可使用本機 AI 及詞庫輸入。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                GlassCard(title: "提示词(内置默认已预填;编辑后点「应用」生效,云端启用时同样生效)") {
-                    promptEditor("候选重排(只输出序号数字)", $model.promptRerank)
-                    promptEditor("整句预测(只输出中文)", $model.promptSentence)
-                    promptEditor("翻译 · 中文→英(只输出译文)", $model.promptTranslateEN)
-                    promptEditor("翻译 · 外文→中(只输出译文)", $model.promptTranslateZH)
-                    HStack(spacing: 10) {
-                        Button("应用") { model.applyPrompts() }
-                            .buttonStyle(.borderedProminent)
-                        Button("全部恢复默认") { model.resetPrompts() }
-                        Spacer()
-                        if !model.promptAppliedHint.isEmpty {
-                            Text(model.promptAppliedHint).font(.caption).foregroundStyle(.green)
-                        }
-                    }
-                    Text("提示词改的是 instructions 段,请保留「只输出…」的格式约束,否则输出无法解析会自动回退词典;与内置默认一致的段落不落盘(跟随内置更新)。请求体(上文/拼音/候选的拼装)由代码固定;引擎与设置中心的翻译页共用这里的配置。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(16)
-        }
-    }
-
-    private func promptEditor(_ title: String, _ text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline).foregroundStyle(.secondary)
-            TextEditor(text: text)
-                .font(.system(size: 12))
-                .frame(height: 64)
-                .padding(6)
-                .background(RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.05)))
-        }
-    }
-}
-
-// MARK: - 测试(实验性交互效果开关)
-
-struct TestView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "水滴拖拽") {
-                    Toggle("固定透镜拖拽(水滴不动,候选条滑过)", isOn: $model.dropletFixedLens)
-                    Text("开:按住水滴后它钉在原地(屏幕固定透镜),整条候选栏(玻璃+文字刚体)随手指平移、从水滴下面滑过,松手上屏水滴正下方的候选。\n关(默认):水滴在候选条内随手指滑动,候选栏不动。\n改动即时生效,下一次按住拖拽即按新模式;此页为实验特性试用区。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(16)
-        }
-    }
-}
-
-// MARK: - 设置
-
-struct SettingsView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                GlassCard(title: "拼音") {
-                    Toggle("模糊拼音", isOn: $model.fuzzy)
-                    Toggle("拼音全形標點", isOn: $model.fullWidthPunct)
-                    Toggle("FM 增强(端侧模型重排 + 整句预测)", isOn: $model.fmEnhance)
-                    Toggle("记住打过的词(用户词库 + 词频加成)", isOn: $model.userFreqEnabled)
-                    Text("改动即时生效,输入法每次按键现读;开关状态写入 moe.bemly.inputmethod.AfmIME 域")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                GlassCard(title: "繁體速成") {
-                    Text("中英混輸：標點及數字使用半形。單碼空白出中文字，雙碼空白循環翻頁（單頁不確認）；無中文候選的英文遇空白、標點或 Delete 立即確認，亦可用 Enter。數字或點選選中文，左右鍵亦可翻頁。保留大小寫，中文字碼 Backspace 逐字刪除；Shift＋數字選聯想。")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Toggle("完整字集（加入擴展字及其他碼字映射）", isOn: $model.quickFullCharset)
-                    Toggle("記住速成選字（只影響速成排序）", isOn: $model.quickLearning)
-                    Toggle("AI 候選推薦（保留第一候選）", isOn: $model.quickAI)
-                    Text("AI 推薦放在第二位並標記 ✦；開始移動選項或翻頁後，當次候選次序會鎖定。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Toggle("速成使用雲端 AI", isOn: $model.quickCloud)
-                        .disabled(!model.quickAI || !ModelPrefs.supportsCloudModels)
-                    Text("預設使用本機模型。雲端沿用「模型」頁的連線設定；開啟後會傳送速成碼、候選及光標前的部分文字。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                GlassCard(title: "外观") {
-                    HStack {
-                        Text("候选条字号").frame(width: 90, alignment: .leading)
-                        Slider(value: $model.fontSize, in: 13...22, step: 1)
-                            .frame(maxWidth: 260)
-                        Text("\(Int(model.fontSize)) pt").monospacedDigit().frame(width: 44)
-                    }
-                    Text("仅候选条生效;展开网格的行距按 28pt 几何闭合,字号固定。改动打字时即可看到。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                GlassCard(title: "快捷键") {
-                    ForEach(model.hotkeyRows) { row in
-                        HStack(spacing: 10) {
-                            Text(row.title).frame(maxWidth: .infinity, alignment: .leading)
-                            Text(row.display)
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                .padding(.horizontal, 10).padding(.vertical, 3)
-                                .background(Capsule().fill(.primary.opacity(0.08)))
-                            if row.custom {
-                                Text("已自定义").font(.caption2).foregroundStyle(.secondary)
-                            }
-                            if model.recordingHotkey == row.id {
-                                Button("取消") { model.stopRecording() }
-                            } else {
-                                Button("修改") { model.startRecording(row.id) }
-                            }
-                        }
-                    }
-                    if !model.hotkeyHint.isEmpty {
-                        Text(model.hotkeyHint).font(.caption).foregroundStyle(.orange)
-                    }
-                    HStack {
-                        Button("全部恢复默认") { model.resetHotkeys() }
-                        Spacer()
-                    }
-                    Text("修饰键固定为 ⌃,主键支持字母/数字/符号;输入法现读现判,改动即时生效。终端里对应组合键会被输入法接管(⌃S 为 XOFF 流控等,已知取舍)。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                GlassCard(title: "说明") {
-                    Text("中英模式:轻点 Shift 随时切换(全部应用生效,跨重启记忆),故不在此重复提供开关。组词中按住 Shift 敲字母可输入大写英文(如 GDP),随候选一并上屏。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .padding(16)
-        }
-        .onDisappear { model.stopRecording() } // 离开设置页:取消录制监控,防止残留吞键
-    }
-}
-
-// MARK: - 入口(WindowGroup 场景:窗口 chrome 交给系统——玻璃侧栏/工具栏/搜索自动生效)
-
-@main
-struct AFMControlCenter: App {
-    var body: some Scene {
-        WindowGroup("AFM輸入法") {
-            RootView(model: AppModel.shared)
-                .onAppear {
-                    // 圖示交由系統按 Assets.car 及外觀設定渲染，不能用靜態 NSImage 蓋過染色版本。
-                    NSLog("[AFMApp] 启动 v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") 词库=\(AppModel.shared.store != nil ? "已加载" : "未找到")")
-                }
-        }
-        .defaultSize(width: 820, height: 560)
-    }
 }
