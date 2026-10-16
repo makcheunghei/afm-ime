@@ -926,6 +926,7 @@ final class CandidateWindowController {
         origin.y = min(max(origin.y, visible.minY + 4),
                        max(visible.minY + 4, visible.maxY - size.height - 4))
         panel.setFrameOrigin(origin)
+        panel.invalidateShadow()
         panel.orderFront(nil)
         onFrameChange?(panel.frame)
         DebugLog.log("quick layout panel=\(NSStringFromRect(panel.frame)) glass=\(NSStringFromRect(glass.frame)) caret=\(NSStringFromRect(caretRect)) screen=\(screen?.localizedName ?? "?") 候選=\(items.count) 起點=\(pageStart) 聯想=\(association)")
@@ -939,6 +940,7 @@ final class CandidateWindowController {
             backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
+        panel.title = "AFM速成候選"
         panel.hasShadow = true
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
@@ -951,10 +953,9 @@ final class CandidateWindowController {
             items: [], selectedIndex: 0, pageStart: 0, pageSize: 9,
             association: false, onSelect: { _ in }))
         let glass = NSGlassEffectView()
-        glass.cornerRadius = 18
+        glass.cornerRadius = 14
         // 標準材質讓系統處理透明度及輔助使用設定；26 沿用原生預設。
         glass.style = .regular
-        if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
         glass.contentView = host
         container.addSubview(glass)
         panel.contentView = container

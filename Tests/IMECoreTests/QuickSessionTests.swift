@@ -142,18 +142,25 @@ struct QuickSessionTests {
         #expect(session.aiRecommendation == nil)
     }
 
-    @Test func associationShiftDigitCommitsContinuationAndClosesWindowForGood() {
-        let (session, _) = makeSession()
-        startAssociation(session)
+    @Test(arguments: [false, true])
+    func associationDigitSelectsEveryCandidateAndClosesWithoutChaining(shifted: Bool) {
+        let continuations = (1...9).map { "續\($0)" }
+        for digit in 1...9 {
+            let (session, _) = makeSession(associations: [
+                "你": continuations,
+                "續1": ["不可串接"],
+            ])
+            startAssociation(session)
 
-        let shifted = session.handle(.digit(1, shifted: true))
-        #expect(shifted.consumed)
-        #expect(shifted.commits == ["們"])
-        #expect(!session.isAssociation, "續文提交後立即關窗")
-        #expect(!session.isCandidateWindowVisible)
-        #expect(session.candidates == [], "們 另有聯想資料亦不再查（不串接）")
-        #expect(session.code == "")
-        #expect(session.markedText == "")
+            let result = session.handle(.digit(digit, shifted: shifted))
+            #expect(result.consumed)
+            #expect(result.commits == [continuations[digit - 1]])
+            #expect(!session.isAssociation, "續文提交後立即關窗")
+            #expect(!session.isCandidateWindowVisible)
+            #expect(session.candidates == [], "續文另有聯想資料亦不串接")
+            #expect(session.code == "")
+            #expect(session.markedText == "")
+        }
     }
 
     @Test func associationShiftDigitBeyondPageIsNotConsumed() {
@@ -166,16 +173,18 @@ struct QuickSessionTests {
         #expect(session.isAssociation)
     }
 
-    @Test func associationPlainDigitAndEnterResetWithoutCommit() {
-        let (digitSession, _) = makeSession()
-        startAssociation(digitSession)
+    @Test func associationPlainZeroAndBeyondPageResetAndPassThrough() {
+        for digit in [0, 7] {
+            let (session, _) = makeSession()
+            startAssociation(session)
 
-        let digit = digitSession.handle(.digit(3, shifted: false))
-        #expect(digit.commits.isEmpty, "聯想普通數字不選字")
-        #expect(!digit.consumed)
-        #expect(!digitSession.isAssociation)
-        #expect(!digitSession.isCandidateWindowVisible)
-        #expect(digitSession.candidates == [])
+            let result = session.handle(.digit(digit, shifted: false))
+            #expect(result.commits.isEmpty)
+            #expect(!result.consumed, "無效普通數字交回 controller 輸入原數字")
+            #expect(!session.isAssociation)
+            #expect(!session.isCandidateWindowVisible)
+            #expect(session.candidates == [])
+        }
 
         let (enterSession, _) = makeSession()
         startAssociation(enterSession)
@@ -185,6 +194,35 @@ struct QuickSessionTests {
         #expect(!enter.consumed)
         #expect(!enterSession.isAssociation)
         #expect(enterSession.candidates == [])
+    }
+
+    @Test func associationPlainDigitSelectsFromSecondPage() {
+        let continuations = (0..<11).map { "續\($0)" }
+        let (session, _) = makeSession(associations: ["你": continuations])
+        startAssociation(session)
+        #expect(session.handle(.nextPage).consumed)
+        #expect(session.pageStart == 9)
+
+        let result = session.handle(.digit(2, shifted: false))
+        #expect(result.consumed)
+        #expect(result.commits == ["續10"])
+        #expect(!session.isAssociation)
+        #expect(session.candidates == [])
+    }
+
+    @Test func associationPlainDigitBeyondShortLastPageResetsAndPassesThrough() {
+        let continuations = (0..<11).map { "續\($0)" }
+        let (session, _) = makeSession(associations: ["你": continuations])
+        startAssociation(session)
+        session.handle(.nextPage)
+        #expect(session.pageStart == 9)
+
+        let result = session.handle(.digit(3, shifted: false))
+        #expect(result.commits.isEmpty)
+        #expect(!result.consumed, "尾頁不足 3 項，原數字交回 controller")
+        #expect(!session.isAssociation)
+        #expect(!session.isCandidateWindowVisible)
+        #expect(session.candidates == [])
     }
 
     @Test func associationNavigationAndNewLetter() {

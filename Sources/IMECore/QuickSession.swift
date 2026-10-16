@@ -181,14 +181,10 @@ public final class QuickSession {
 
     private func handleDigit(_ value: Int, shifted: Bool) -> QuickResult {
         if isAssociation {
-            guard shifted else {
-                // 聯想普通數字不選字：放行給 controller（會插入字元），順手關窗清狀態。
-                reset()
-                return QuickResult(consumed: false)
-            }
             let index = pageStart + value - 1
             guard (1...QuickSession.pageSize).contains(value), candidates.indices.contains(index) else {
-                // 本頁沒有對應續文：Shift＋數字留給 controller 當符號。
+                // 普通數字當原文放行並關窗；Shift＋數字留給 controller 當符號，保留聯想窗。
+                if !shifted { reset() }
                 return QuickResult(consumed: false)
             }
             let text = candidates[index]

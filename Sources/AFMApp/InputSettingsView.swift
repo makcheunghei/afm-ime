@@ -160,7 +160,7 @@ struct SettingsView: View {
                 guide("Space", "單字碼直接出字；雙字碼循環翻頁，只有一頁時不作確認。")
                 guide("Enter", "輸出原有英文字元，保留大小寫。")
                 guide("← →", "切換候選頁。數字或點選確認中文字。")
-                guide("⇧ 1–9", "選擇聯想詞。")
+                guide("1–9", "選擇中文字或聯想詞，兩者操作相同。")
                 SettingsNotice("沒有中文候選的英文，遇空白、半形標點或 Delete 即確認。")
                 SettingsNotice("開啟雲端 AI 後，會向已設定的服務商傳送速成碼、候選及光標前的部分文字。")
             } else {

@@ -131,7 +131,7 @@ struct InputPreview: View {
                 Text("每頁 9 個候選 · 單欄排列")
                     .font(.caption).foregroundStyle(.secondary)
                 shortcut("← →", "切換候選頁")
-                shortcut("1–9", "確認中文字")
+                shortcut("1–9", "選字或選聯想")
                 shortcut("Enter", "輸出英文字元")
             } else {
                 Text("拼音候選條的字體及詞庫預覽。")
@@ -146,7 +146,6 @@ struct InputPreview: View {
     private var quickCandidates: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text("速成")
                 Spacer()
                 Text("\(preview.page + 1)/\(preview.pageCount)").monospacedDigit()
             }
