@@ -31,15 +31,6 @@ struct SettingsView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Picker("設定的輸入法", selection: $model.settingsMode) {
-                    ForEach(InputSettingsMode.allCases) { mode in Text(mode.title).tag(mode) }
-                }
-                .pickerStyle(.segmented).frame(width: 216)
-                .help("選擇要調整的模式，不會切換系統輸入來源")
-            }
-        }
         .onAppear { updatePreview() }
         .onChange(of: model.settingsMode) { _, _ in updatePreview() }
         .onChange(of: model.quickFullCharset) { _, _ in updatePreview() }
@@ -117,6 +108,11 @@ struct SettingsView: View {
                     option("速成使用雲端 AI", $model.quickCloud)
                         .disabled(!model.quickAI || !ModelPrefs.supportsCloudModels)
                 }
+                Divider()
+                SettingsRow(title: "使用雲端翻譯", detail: "與推薦分開；預設只使用本機模型") {
+                    option("速成使用雲端翻譯", $model.quickTranslationCloud)
+                        .disabled(!ModelPrefs.supportsCloudModels)
+                }
             } else {
                 SettingsRow(title: "AI 候選推薦", detail: "本機模型輔助重排及整句預測") { option("拼音 AI 候選推薦", $model.fmEnhance) }
                 Divider()
@@ -158,6 +154,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             if model.settingsMode == .quick {
                 guide("Space", "單字碼直接出字；雙字碼循環翻頁，只有一頁時不作確認。")
+                guide("⌃F", "組詞中翻譯目前字詞；按 1 選譯文。Space 不確認翻譯，Enter 輸出原文字碼，Esc 返回原文字碼。")
                 guide("Enter", "輸出原有英文字元，保留大小寫。")
                 guide("← →", "切換候選頁。數字或點選確認中文字。")
                 guide("1–9", "選擇中文字或聯想詞，兩者操作相同。")

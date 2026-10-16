@@ -3,19 +3,19 @@ import Foundation
 /// Exact-code lookup and optional, per-code user ordering for Quick candidates.
 public final class QuickEngine {
     private let dictionary: QuickDictionary
-    private let defaults: UserDefaults
+    private let learningStore: QuickLearningStore
     public var roots: [String: String] { dictionary.roots }
 
-    public init(dictionary: QuickDictionary, defaults: UserDefaults = .standard) {
+    public init(dictionary: QuickDictionary, defaults: UserDefaults = .standard, learningStore: QuickLearningStore? = nil) {
         self.dictionary = dictionary
-        self.defaults = defaults
+        self.learningStore = learningStore ?? QuickLearningStore(defaults: defaults)
     }
 
     public func candidates(for code: String, fullCharset: Bool = false, learning: Bool = false) -> [String] {
         let original = dictionary.candidates(for: code, fullCharset: fullCharset)
-        guard learning, !original.isEmpty,
-              let counts = defaults.dictionary(forKey: QuickPrefs.learningDataKey) as? [String: [String: Int]],
-              let codeCounts = counts[code] else { return original }
+        guard learning, !original.isEmpty else { return original }
+        let codeCounts = learningStore.counts(for: code)
+        guard !codeCounts.isEmpty else { return original }
 
         let positions = Dictionary(uniqueKeysWithValues: original.enumerated().map { ($1, $0) })
         return original.sorted { lhs, rhs in
@@ -40,8 +40,6 @@ public final class QuickEngine {
               (dictionary.candidates(for: code).contains(text)
                 || dictionary.candidates(for: code, fullCharset: true).contains(text)) else { return }
 
-        var counts = defaults.dictionary(forKey: QuickPrefs.learningDataKey) as? [String: [String: Int]] ?? [:]
-        counts[code, default: [:]][text, default: 0] += 1
-        defaults.set(counts, forKey: QuickPrefs.learningDataKey)
+        learningStore.record(code: code, text: text)
     }
 }

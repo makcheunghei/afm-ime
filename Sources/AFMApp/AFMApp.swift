@@ -18,11 +18,13 @@ final class AppModel: ObservableObject {
     static let shared = AppModel()
 
     typealias TranslateOperation = (String) async -> String?
+    typealias ModeAwareTranslateOperation = (String, InputMethodMode, Bool) async -> String?
     typealias CloudProbeOperation = (String, String, String, String) async -> String
 
     private let defaults: UserDefaults
     private let navigationDefaults: UserDefaults
-    private let translateOperation: TranslateOperation
+    private let broadcastsConfigurationChanges: Bool
+    private let modeAwareTranslateOperation: ModeAwareTranslateOperation
     private let cloudProbeOperation: CloudProbeOperation
     private(set) var translateTask: Task<Void, Never>?
     private(set) var cloudProbeTask: Task<Void, Never>?
@@ -60,7 +62,22 @@ final class AppModel: ObservableObject {
             if tab != .settings { stopRecording() }
         }
     }
-    @Published var settingsMode: InputSettingsMode = .quick
+    struct ModeSnapshot {
+        var translateInput = ""
+        var translateResult = ""
+    }
+    @Published var settingsMode: InputSettingsMode = .quick {
+        didSet {
+            guard settingsMode != oldValue else { return }
+            navigationDefaults.set(settingsMode.rawValue, forKey: "AFMSettingsMode")
+            saveModeSnapshot(oldValue)
+            cancelTranslation()
+            restoreModeSnapshot(settingsMode)
+            reloadDict()
+            reloadUserRows()
+        }
+    }
+    private var modeSnapshots: [InputSettingsMode: ModeSnapshot] = [:]
     let preview = InputPreviewModel()
 
     // 系統維護；不複製或刪除 App，不更改詞庫及模型偏好。
@@ -74,6 +91,26 @@ final class AppModel: ObservableObject {
     @Published var dictPage = 0 { didSet { reloadDict() } }
     @Published var dictStats = ""
     private(set) var store: DictStore?
+    private(set) var quickDictionary: QuickDictionary?
+    private var quickDictionaryBrowser: QuickDictionaryBrowser?
+    private(set) var quickLearningStore: QuickLearningStore?
+    var previewDefaults: UserDefaults { defaults }
+    @Published var quickDictSection: QuickDictionarySection = .codes {
+        didSet { if quickDictSection != oldValue { quickDictPage = 0; reloadQuickDict() } }
+    }
+    @Published var quickDictFullCharset = false {
+        didSet { if quickDictFullCharset != oldValue { quickDictPage = 0; reloadQuickDict() } }
+    }
+    @Published var quickDictSearch = "" {
+        didSet { if quickDictSearch != oldValue { quickDictPage = 0; reloadQuickDict() } }
+    }
+    @Published var quickDictPage = 0 {
+        didSet { if quickDictPage != oldValue { reloadQuickDict() } }
+    }
+    @Published var quickDictRows: [QuickDictionaryRow] = []
+    @Published var quickDictTotalCount = 0
+    @Published var quickDictPageCount = 1
+    @Published var quickDictUnavailable = false
 
     // 用户词
     struct UserRow: Identifiable {
@@ -84,7 +121,17 @@ final class AppModel: ObservableObject {
         let score: Int
         let boost: Double
     }
+    struct QuickUserRow: Identifiable {
+        let id: String
+        let code: String
+        let roots: String
+        let text: String
+        let count: Int
+    }
     @Published var userRows: [UserRow] = []
+    @Published var quickUserRows: [QuickUserRow] = []
+    @Published var userSearch = ""
+    @Published var quickUserSearch = "" { didSet { reloadUserRows() } }
     @Published var userMessage = ""   // 导入结果等一次性提示
 
     // 设置(键名 = UserPrefs)
@@ -96,11 +143,22 @@ final class AppModel: ObservableObject {
     @Published var quickLearning: Bool { didSet { write(QuickPrefs.learningKey, quickLearning) } }
     @Published var quickAI: Bool { didSet { write(QuickPrefs.aiKey, quickAI) } }
     @Published var quickCloud: Bool { didSet { write(QuickPrefs.cloudKey, quickCloud) } }
+    @Published var quickTranslationCloud: Bool {
+        didSet {
+            guard quickTranslationCloud != oldValue else { return }
+            cancelTranslation(clearResult: true)
+            defaults.set(quickTranslationCloud, forKey: QuickPrefs.translationCloudKey)
+            defaults.synchronize()
+            postConfigurationChange()
+        }
+    }
     @Published var fontSize: Double { didSet { write("AFMCandidateFontSize", Int(fontSize)) } }
     // 测试:固定透镜拖拽(droplet-relative-motion 支线移植)——键名与 UserPrefs.dropletFixedLens 逐字一致
     @Published var dropletFixedLens: Bool { didSet { write("AFMDropletFixedLens", dropletFixedLens) } }
     @Published var confirmPrepareRemoval = false
     @Published var confirmClear = false
+    @Published var confirmQuickClear = false
+    @Published var confirmQuickDelete: QuickUserRow?
 
     // 快捷键(kb35): IME handle 现读现判,defaults 只存 keyCode(+显示字符免查键码表);
     // 修饰固定为 ⌃(IME 拦截层只拦 ⌃ 组合),录制时强制校验
@@ -134,19 +192,19 @@ final class AppModel: ObservableObject {
     ]
     @Published var cloudEnabled: Bool { didSet { write(ModelPrefs.cloudEnabledKey, cloudEnabled) } }
     @Published var cloudProvider: String {
-        didSet { write(ModelPrefs.cloudProviderKey, cloudProvider); invalidateCloudTest(); applyCloudPreset() }
+        didSet { guard cloudProvider != oldValue else { return }; cancelTranslation(clearResult: true); writeConfiguration(ModelPrefs.cloudProviderKey, cloudProvider); invalidateCloudTest(); applyCloudPreset() }
     }
     @Published var cloudBaseURL: String {
-        didSet { write(ModelPrefs.cloudBaseURLKey, cloudBaseURL); invalidateCloudTest() }
+        didSet { guard cloudBaseURL != oldValue else { return }; cancelTranslation(clearResult: true); writeConfiguration(ModelPrefs.cloudBaseURLKey, cloudBaseURL); invalidateCloudTest() }
     }
     @Published var cloudAPIKey: String {
-        didSet { write(ModelPrefs.cloudAPIKeyKey, cloudAPIKey); invalidateCloudTest() }
+        didSet { guard cloudAPIKey != oldValue else { return }; cancelTranslation(clearResult: true); writeConfiguration(ModelPrefs.cloudAPIKeyKey, cloudAPIKey); invalidateCloudTest() }
     }
     @Published var cloudModel: String {
-        didSet { write(ModelPrefs.cloudModelKey, cloudModel); invalidateCloudTest() }
+        didSet { guard cloudModel != oldValue else { return }; cancelTranslation(clearResult: true); writeConfiguration(ModelPrefs.cloudModelKey, cloudModel); invalidateCloudTest() }
     }
     @Published var cloudFormat: String {
-        didSet { write(ModelPrefs.cloudFormatKey, cloudFormat); invalidateCloudTest() }
+        didSet { guard cloudFormat != oldValue else { return }; cancelTranslation(clearResult: true); writeConfiguration(ModelPrefs.cloudFormatKey, cloudFormat); invalidateCloudTest() }
     }
     // 提示词 = 草稿-应用模式(kb36.1):编辑框预填当前生效值(覆盖 ?? 内置默认),编辑不落盘,
     // 点「应用」才写入(与内置一致的草稿会清掉覆盖键,保证内置更新可跟随);引擎/helper 现读现判
@@ -154,6 +212,9 @@ final class AppModel: ObservableObject {
     @Published var promptSentence = ""
     @Published var promptTranslateEN = ""
     @Published var promptTranslateZH = ""
+    @Published var promptQuickRerank = ""
+    @Published var promptQuickTranslateEN = ""
+    @Published var promptQuickTranslateZH = ""
     @Published var promptAppliedHint = ""
     @Published var cloudTestResult = ""
     @Published var cloudTesting = false
@@ -200,7 +261,11 @@ final class AppModel: ObservableObject {
     /// 应用提示词草稿:与内置默认一致的段落清掉覆盖键(跟随内置更新),其余写入
     func applyPrompts() {
         let d = defaults
-        let pairs: [(key: String, value: String, def: String)] = [
+        let pairs: [(key: String, value: String, def: String)] = settingsMode == .quick ? [
+            (ModelPrefs.promptQuickRerankKey, promptQuickRerank, FMReranker.defaultQuickRerankInstructions),
+            (ModelPrefs.promptQuickTranslateENKey, promptQuickTranslateEN, FMReranker.defaultQuickTranslateENInstructions),
+            (ModelPrefs.promptQuickTranslateZHKey, promptQuickTranslateZH, FMReranker.defaultQuickTranslateZHInstructions),
+        ] : [
             (ModelPrefs.promptRerankKey, promptRerank, FMReranker.defaultRerankInstructions),
             (ModelPrefs.promptSentenceKey, promptSentence, FMReranker.defaultSentenceInstructions),
             (ModelPrefs.promptTranslateENKey, promptTranslateEN, FMReranker.defaultTranslateENInstructions),
@@ -213,17 +278,26 @@ final class AppModel: ObservableObject {
             } else {
                 d.set(p.value, forKey: p.key)
             }
-            NSLog("[AFMApp] 提示词应用 \(p.key)(\(blank || p.value == p.def ? "默认" : "自訂"))")
+            NSLog("[AFMApp] 提示詞應用 \(p.key)(\(blank || p.value == p.def ? "預設" : "自訂"))")
         }
+        cancelTranslation(clearResult: true)
+        defaults.synchronize()
+        postConfigurationChange()
         promptAppliedHint = "已套用，輸入法即時生效"
     }
 
     /// 全部恢复默认:草稿填回内置默认并立即应用
     func resetPrompts() {
-        promptRerank = FMReranker.defaultRerankInstructions
-        promptSentence = FMReranker.defaultSentenceInstructions
-        promptTranslateEN = FMReranker.defaultTranslateENInstructions
-        promptTranslateZH = FMReranker.defaultTranslateZHInstructions
+        if settingsMode == .quick {
+            promptQuickRerank = FMReranker.defaultQuickRerankInstructions
+            promptQuickTranslateEN = FMReranker.defaultQuickTranslateENInstructions
+            promptQuickTranslateZH = FMReranker.defaultQuickTranslateZHInstructions
+        } else {
+            promptRerank = FMReranker.defaultRerankInstructions
+            promptSentence = FMReranker.defaultSentenceInstructions
+            promptTranslateEN = FMReranker.defaultTranslateENInstructions
+            promptTranslateZH = FMReranker.defaultTranslateZHInstructions
+        }
         applyPrompts()
         NSLog("[AFMApp] FM 提示词全部恢复默认")
     }
@@ -232,21 +306,19 @@ final class AppModel: ObservableObject {
     @Published var translateInput = "" {
         didSet {
             guard translateInput != oldValue else { return }
-            translateRequestGeneration &+= 1
-            translateTask?.cancel()
-            translateTask = nil
-            translating = false
-            translateResult = ""
+            cancelTranslation(clearResult: true)
         }
     }
     @Published var translateResult = ""
     @Published var translating = false
     private var translateRequestGeneration = 0
+    private var translateMode: InputMethodMode { settingsMode == .quick ? .quick : .pinyin }
+    private var allowCloudTranslation: Bool { settingsMode == .quick ? quickTranslationCloud : cloudEnabled }
 
     var translateDirection: String {
         if translateInput.trimmingCharacters(in: .whitespaces).isEmpty { return "自動" }
-        let hasCJK = translateInput.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
-        return hasCJK ? "中 → 英" : "英 → 中"
+        let hasCJK = FMReranker.containsChinese(translateInput)
+        return hasCJK ? "中文 → 英文" : (settingsMode == .quick ? "外文 → 繁體中文" : "外文 → 簡體中文")
     }
 
     func submitTranslate() {
@@ -257,10 +329,12 @@ final class AppModel: ObservableObject {
         translateResult = ""
         translateRequestGeneration &+= 1
         let generation = translateRequestGeneration
-        let operation = translateOperation
+        let operation = modeAwareTranslateOperation
+        let mode = translateMode
+        let allowCloud = allowCloudTranslation
         translateTask = Task { [weak self] in
             guard !Task.isCancelled else { return }
-            let out = await operation(text)
+            let out = await operation(text, mode, allowCloud)
             guard !Task.isCancelled, let self,
                   generation == self.translateRequestGeneration else { return }
             self.translating = false
@@ -269,13 +343,45 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func writeConfiguration(_ key: String, _ value: String) {
+        defaults.set(value, forKey: key)
+        defaults.synchronize()
+        NSLog("[AFMApp] 設定已更新：\(key)")
+        postConfigurationChange()
+    }
+
+    private func postConfigurationChange() {
+        guard broadcastsConfigurationChanges else { return }
+        ModelPrefs.postConfigurationChange()
+    }
+
+    private func cancelTranslation(clearResult: Bool = false) {
+        translateRequestGeneration &+= 1
+        translateTask?.cancel()
+        translateTask = nil
+        translating = false
+        if clearResult { translateResult = "" }
+    }
+
+    private func saveModeSnapshot(_ mode: InputSettingsMode) {
+        // 搜尋、頁碼及提示詞各自已有獨立屬性；只有共用編輯器需要切換快照。
+        modeSnapshots[mode] = ModeSnapshot(translateInput: translateInput, translateResult: translateResult)
+    }
+
+    private func restoreModeSnapshot(_ mode: InputSettingsMode) {
+        let snapshot = modeSnapshots[mode] ?? ModeSnapshot()
+        translateInput = snapshot.translateInput
+        translateResult = snapshot.translateResult
+    }
+
     static var imeDefaults: UserDefaults {
         UserDefaults(suiteName: imeDomain) ?? .standard
     }
 
     init(
         defaults: UserDefaults? = nil,
-        translate: @escaping TranslateOperation = { text in await FMReranker.shared.translate(text) },
+        translate: TranslateOperation? = nil,
+        translateModeAware: ModeAwareTranslateOperation? = nil,
         cloudProbe: @escaping CloudProbeOperation = { baseURL, apiKey, modelName, wireFormat in
             guard #available(macOS 27.0, *) else {
                 return "雲端 AI 需要 macOS 27 或以上；目前可使用本機 AI 及詞庫輸入。"
@@ -283,14 +389,24 @@ final class AppModel: ObservableObject {
             return await CloudProviderModel.probe(baseURL: baseURL, apiKey: apiKey,
                                                   modelName: modelName, wireFormat: wireFormat)
         },
-        loadDictionary: Bool = true
+        loadDictionary: Bool = true,
+        dictionary injectedQuickDictionary: QuickDictionary? = nil,
+        learningStore injectedLearningStore: QuickLearningStore? = nil
     ) {
         let d = defaults ?? Self.imeDefaults
         self.defaults = d
         self.navigationDefaults = defaults ?? .standard
-        self.translateOperation = translate
+        self.broadcastsConfigurationChanges = defaults == nil
+        if let translate {
+            self.modeAwareTranslateOperation = { text, _, _ in await translate(text) }
+        } else {
+            self.modeAwareTranslateOperation = translateModeAware ?? { text, mode, allowCloud in
+                await FMReranker.shared.translate(text, mode: mode, allowCloud: allowCloud, defaults: d)
+            }
+        }
         self.cloudProbeOperation = cloudProbe
         tab = Tab(rawValue: navigationDefaults.string(forKey: "AFMSettingsLastPane") ?? "") ?? .settings
+        settingsMode = InputSettingsMode(rawValue: navigationDefaults.string(forKey: "AFMSettingsMode") ?? "quick") ?? .quick
         fuzzy = d.object(forKey: "AFMFuzzyPinyin") as? Bool ?? true
         fullWidthPunct = d.object(forKey: "AFMFullWidthPunct") as? Bool ?? true
         fmEnhance = d.object(forKey: "AFMFMEnhance") as? Bool ?? true
@@ -299,6 +415,7 @@ final class AppModel: ObservableObject {
         quickLearning = d.bool(forKey: QuickPrefs.learningKey)
         quickAI = d.bool(forKey: QuickPrefs.aiKey)
         quickCloud = d.bool(forKey: QuickPrefs.cloudKey)
+        quickTranslationCloud = d.bool(forKey: QuickPrefs.translationCloudKey)
         fontSize = Double(d.object(forKey: "AFMCandidateFontSize") as? Int ?? 16)
         dropletFixedLens = d.object(forKey: "AFMDropletFixedLens") as? Bool ?? false
         cloudEnabled = d.object(forKey: ModelPrefs.cloudEnabledKey) as? Bool ?? false
@@ -311,7 +428,20 @@ final class AppModel: ObservableObject {
         promptSentence = (d.string(forKey: ModelPrefs.promptSentenceKey) ?? "").isEmpty ? FMReranker.defaultSentenceInstructions : d.string(forKey: ModelPrefs.promptSentenceKey)!
         promptTranslateEN = (d.string(forKey: ModelPrefs.promptTranslateENKey) ?? "").isEmpty ? FMReranker.defaultTranslateENInstructions : d.string(forKey: ModelPrefs.promptTranslateENKey)!
         promptTranslateZH = (d.string(forKey: ModelPrefs.promptTranslateZHKey) ?? "").isEmpty ? FMReranker.defaultTranslateZHInstructions : d.string(forKey: ModelPrefs.promptTranslateZHKey)!
+        promptQuickRerank = (d.string(forKey: ModelPrefs.promptQuickRerankKey) ?? "").isEmpty ? FMReranker.defaultQuickRerankInstructions : d.string(forKey: ModelPrefs.promptQuickRerankKey)!
+        promptQuickTranslateEN = (d.string(forKey: ModelPrefs.promptQuickTranslateENKey) ?? "").isEmpty ? FMReranker.defaultQuickTranslateENInstructions : d.string(forKey: ModelPrefs.promptQuickTranslateENKey)!
+        promptQuickTranslateZH = (d.string(forKey: ModelPrefs.promptQuickTranslateZHKey) ?? "").isEmpty ? FMReranker.defaultQuickTranslateZHInstructions : d.string(forKey: ModelPrefs.promptQuickTranslateZHKey)!
+        quickDictionary = injectedQuickDictionary ?? (loadDictionary ? Self.loadQuickDictionary(engineBundleURL: engineBundleURL) : nil)
+        quickDictionaryBrowser = quickDictionary.map(QuickDictionaryBrowser.init)
+        quickLearningStore = injectedLearningStore
+        if quickLearningStore == nil {
+            let lockURL = defaults == nil ? nil : FileManager.default.temporaryDirectory
+                .appendingPathComponent("AFMAppTests-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("quick-learning.lock")
+            quickLearningStore = QuickLearningStore(defaults: d, lockURL: lockURL)
+        }
         if loadDictionary { loadStore() }
+        reloadQuickDict()
         reloadUserRows()
         loadHotkeys()
     }
@@ -324,18 +454,25 @@ final class AppModel: ObservableObject {
     private func write(_ key: String, _ value: Bool) {
         defaults.set(value, forKey: key)
         NSLog("[AFMApp] 设置 \(key) = \(value)")
+        if [ModelPrefs.cloudEnabledKey, QuickPrefs.aiKey, QuickPrefs.cloudKey].contains(key) {
+            cancelTranslation(clearResult: true)
+            defaults.synchronize()
+            postConfigurationChange()
+        }
+    }
+
+    func setSettingsMode(_ mode: InputSettingsMode) {
+        settingsMode = mode
+        navigationDefaults.set(mode.rawValue, forKey: "AFMSettingsMode")
+        preview.configure(mode: mode, model: self)
     }
     private func write(_ key: String, _ value: Int) {
         defaults.set(value, forKey: key)
         NSLog("[AFMApp] 设置 \(key) = \(value)")
     }
     private func write(_ key: String, _ value: String) {
-        defaults.set(value, forKey: key)
-        if key == ModelPrefs.cloudAPIKeyKey {
-            NSLog("[AFMApp] 雲端憑證已更新")
-        } else {
-            NSLog("[AFMApp] 设置 \(key) = \(value.prefix(60))")
-        }
+        cancelTranslation(clearResult: true)
+        writeConfiguration(key, value)
     }
 
     // MARK: 快捷键(kb35)
@@ -343,14 +480,20 @@ final class AppModel: ObservableObject {
     private func loadHotkeys() {
         let d = defaults
         hotkeyRows = Self.hotkeySlots.map { slot in
-            let custom = d.object(forKey: slot.key) != nil
-            let disp = d.string(forKey: slot.displayKey) ?? slot.fallbackDisplay
+            let storedCode = d.object(forKey: slot.key) as? Int
+            let reserved = storedCode == 39
+            let custom = storedCode != nil && !reserved
+            let disp = reserved ? slot.fallbackDisplay : (d.string(forKey: slot.displayKey) ?? slot.fallbackDisplay)
             return HotkeyRow(id: slot.key, title: slot.title, display: "⌃\(disp)", custom: custom)
         }
     }
 
+    static func resolvedHotkeyCode(stored: Int?, fallback: Int) -> Int {
+        stored == 39 ? fallback : (stored ?? fallback)
+    }
+
     private func effectiveCode(_ slot: (key: String, displayKey: String, fallback: Int, fallbackDisplay: String, title: String)) -> Int {
-        defaults.object(forKey: slot.key) as? Int ?? slot.fallback
+        Self.resolvedHotkeyCode(stored: defaults.object(forKey: slot.key) as? Int, fallback: slot.fallback)
     }
 
     func startRecording(_ id: String) {
@@ -386,6 +529,10 @@ final class AppModel: ObservableObject {
         guard mods.contains(.control), !mods.contains(.option), !mods.contains(.command), !mods.contains(.shift),
               let display = displayChar(for: ev) else {
             hotkeyHint = "請按 Control＋單個字母、數字或符號；不支援其他修飾鍵或功能鍵。按 Esc 取消。"
+            return
+        }
+        guard ev.keyCode != 39 else {
+            hotkeyHint = "Control＋; 已保留，請選擇其他按鍵。"
             return
         }
         guard let slot = Self.hotkeySlots.first(where: { $0.key == recordingHotkey }) else {
@@ -440,6 +587,7 @@ final class AppModel: ObservableObject {
     }
 
     func reloadDict() {
+        guard settingsMode == .pinyin else { return }
         guard let store else { return }
         let rawTerm = dictSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let term = rawTerm.filter { ("a"..."z").contains($0) }
@@ -463,9 +611,55 @@ final class AppModel: ObservableObject {
         !dictSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    func reloadQuickDict() {
+        guard settingsMode == .quick else { return }
+        guard let browser = quickDictionaryBrowser else {
+            quickDictUnavailable = true; quickDictRows = []; quickDictTotalCount = 0; quickDictPageCount = 1
+            return
+        }
+        quickDictUnavailable = false
+        let page = browser.page(
+            section: quickDictSection, fullCharset: quickDictFullCharset,
+            search: quickDictSearch, page: quickDictPage, pageSize: 100
+        )
+        quickDictRows = page.rows
+        quickDictTotalCount = page.totalCount
+        quickDictPageCount = max(1, page.pageCount)
+        let boundedPage = min(max(0, quickDictPage), quickDictPageCount - 1)
+        if quickDictPage != boundedPage { quickDictPage = boundedPage }
+    }
+
+    var isSearchingQuickDict: Bool { !quickDictSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private static func loadQuickDictionary(engineBundleURL: URL) -> QuickDictionary? {
+        let paths = [
+            IMEInstaller.installedIMEURL().appendingPathComponent("Contents/Resources/quick.json"),
+            engineBundleURL.appendingPathComponent("Contents/Resources/quick.json"),
+            URL(fileURLWithPath: "Data/quick.json"),
+        ]
+        for url in paths where FileManager.default.fileExists(atPath: url.path) {
+            if let dictionary = try? QuickDictionary(url: url) { return dictionary }
+        }
+        return nil
+    }
+
     // MARK: 用户词
 
     func reloadUserRows() {
+        if settingsMode == .quick {
+            quickUserRows = quickLearningStore?.entries().filter { entry in
+                let term = quickUserSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let roots = entry.code.map { quickDictionary?.roots[String($0)] ?? "" }.joined()
+                return term.isEmpty || entry.code.localizedCaseInsensitiveContains(term)
+                    || roots.localizedCaseInsensitiveContains(term)
+                    || entry.text.localizedCaseInsensitiveContains(term)
+            }.map { entry in
+                QuickUserRow(id: entry.id, code: entry.code,
+                             roots: entry.code.map { quickDictionary?.roots[String($0)] ?? "" }.joined(),
+                             text: entry.text, count: entry.count)
+            } ?? []
+            return
+        }
         let uf = UserFreq(defaults: defaults, observesExternalChanges: false)
         let counts = defaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
         let pins = defaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
@@ -477,6 +671,44 @@ final class AppModel: ObservableObject {
             }
     }
 
+    func deleteQuickUser(_ entry: QuickUserRow) {
+        guard quickLearningStore?.remove(code: entry.code, text: entry.text) == true else {
+            userMessage = "刪除失敗，請重新整理後再試。"; return
+        }
+        userMessage = "已刪除「\(entry.text)」。"
+        reloadUserRows()
+    }
+
+    func clearQuickUsers() {
+        guard quickLearningStore?.clear() == true else {
+            userMessage = "清空失敗，請稍後再試。"; return
+        }
+        userMessage = "已清空速成個人詞語。"
+        reloadUserRows()
+    }
+
+    func importQuickUsers(from url: URL) {
+        guard let quickDictionary else { userMessage = "未能載入速成詞庫，無法驗證匯入內容。"; return }
+        do {
+            let result = try quickLearningStore?.importJSON(Data(contentsOf: url), dictionary: quickDictionary)
+            guard let result else { throw QuickLearningImportError.storageUnavailable }
+            userMessage = "匯入完成：新增 \(result.added) 條、更新 \(result.updated) 條、略過 \(result.skipped) 條。"
+            reloadUserRows()
+        } catch {
+            userMessage = "匯入失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func importQuickUsers() {
+        let panel = NSOpenPanel()
+        panel.title = "匯入速成個人詞語"
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        importQuickUsers(from: url)
+    }
+
     func deleteUser(_ word: String) {
         var counts = defaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
         var pins = defaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
@@ -486,7 +718,7 @@ final class AppModel: ObservableObject {
         defaults.set(pins, forKey: "AFMUserPinyin")
         UserFreq.tombstone(words: [word], defaults: defaults) // 删过的不随内置种子版本升级复活
         NSLog("[AFMApp] 删除用户词 '\(word)'")
-        UserFreq.postExternalChange() // 引擎内存副本持有旧表,不广播会被下次防抖保存复活
+        if broadcastsConfigurationChanges { UserFreq.postExternalChange() } // 正式引擎重讀，測試保持隔離
         reloadUserRows()
     }
 
@@ -497,7 +729,7 @@ final class AppModel: ObservableObject {
         defaults.removeObject(forKey: "AFMUserPinyin")
         defaults.set(UUID().uuidString, forKey: UserFreq.clearMarkerKey)
         NSLog("[AFMApp] 清空用户词库(墓碑 \(counts.count) 条)")
-        UserFreq.postExternalChange()
+        if broadcastsConfigurationChanges { UserFreq.postExternalChange() }
         reloadUserRows()
     }
 
@@ -542,7 +774,7 @@ final class AppModel: ObservableObject {
         defaults.set(counts, forKey: "AFMUserFreq")
         defaults.set(pins, forKey: "AFMUserPinyin")
         UserFreq.untombstone(words: importedWords, defaults: defaults)
-        UserFreq.postExternalChange()
+        if broadcastsConfigurationChanges { UserFreq.postExternalChange() }
         NSLog("[AFMApp] 导入用户词: 新增 \(added) 更新 \(updated) 跳过 \(skipped)(源 \(url.lastPathComponent))")
         userMessage = "匯入完成：新增 \(added) 條、更新 \(updated) 條\(skipped > 0 ? "、略過無效資料 \(skipped) 條" : "")；共 \(counts.count) 條。"
         reloadUserRows()

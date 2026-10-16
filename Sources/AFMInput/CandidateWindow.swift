@@ -894,6 +894,7 @@ final class CandidateWindowController {
     /// 顯示 Quick 候選面板。items 保留全量候選及其全域 index，點選回傳該 index。
     func showQuick(items: [CandidateItem], selectedIndex: Int, pageStart: Int,
                    pageSize: Int = 9, association: Bool,
+                   translation: QuickTranslationSession.Phase? = nil,
                    caretRect: NSRect, onSelect: @escaping (Int) -> Void) {
         panel?.orderOut(nil)
         onFrameChange?(nil)
@@ -903,7 +904,7 @@ final class CandidateWindowController {
 
         host.rootView = QuickCandidateView(
             items: items, selectedIndex: selectedIndex, pageStart: pageStart,
-            pageSize: pageSize, association: association, onSelect: onSelect)
+            pageSize: pageSize, association: association, translation: translation, onSelect: onSelect)
 
         let desired = host.fittingSize
         let screen = screen(for: caretRect)

@@ -242,7 +242,7 @@ final class ClipboardPanelController {
         panel?.orderOut(nil) // 从未激活,无需还焦点/改激活策略
     }
 
-    /// 选中插入(点击/键盘共用): 组词中先按空格语义上屏首选再插入(客户端仍持焦点,立即执行)
+    /// 點選／鍵盤插入共用：速成先確認英文原文，拼音先確認首選；不改變客戶端焦點。
     func pick(_ text: String) {
         close()
         InputController.insertFromPanel(text)

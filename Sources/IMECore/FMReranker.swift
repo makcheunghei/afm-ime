@@ -16,6 +16,9 @@ public final class FMReranker {
     public static let defaultSentenceInstructions = "你是中文拼音输入法的整句预测引擎。把用户输入的拼音串转成最通顺的中文。只输出中文结果,禁止解释、禁止重复拼音。"
     public static let defaultTranslateENInstructions = "你是翻译引擎。把用户输入的中文翻译成地道的英文。只输出译文,不要解释、不要加引号。"
     public static let defaultTranslateZHInstructions = "你是翻译引擎。把用户输入的外文翻译成通顺的简体中文。只输出译文,不要解释、不要加引号。"
+    public static let defaultQuickRerankInstructions = "你是香港繁體速成輸入法的候選推薦引擎。根據上文、速成碼和候選列表，選出最符合語境的一項。只能選列表內已有候選。只輸出序號數字，不要解釋。"
+    public static let defaultQuickTranslateENInstructions = "你是翻譯引擎。把使用者輸入的中文翻譯成自然的英文。只輸出譯文，不要解釋、不要加引號。"
+    public static let defaultQuickTranslateZHInstructions = "你是香港繁體中文翻譯引擎。把使用者輸入的外文翻譯成自然的繁體中文，採用香港慣用詞彙及繁體字。只輸出譯文，不要解釋、不要加引號。"
 
     /// 提示词解析顺序:设置中心覆盖 → 内置默认(每次调用现读,cfprefsd 跨进程失效即时生效)
     private static var rerankInstructions: String {
@@ -33,10 +36,10 @@ public final class FMReranker {
     /// 统一出入口:云端启用且配置完整 → 云端(Provider 协议);失败/未启用/配置不全 → 端侧 FM;
     /// 都失败 → nil。label 仅用于日志区分(重排/整句/翻译)。
     private func respond(label: String, instructions: String, prompt: String,
-                         cloudOverride: Bool? = nil) async -> String? {
+                         cloudOverride: Bool? = nil, defaults: UserDefaults = .standard) async -> String? {
         guard !Task.isCancelled else { return nil }
         if #available(macOS 27.0, *), cloudOverride ?? ModelPrefs.cloudEnabled,
-           let cfg = CloudProviderModel.configured() {
+           let cfg = CloudProviderModel.configured(defaults: defaults) {
             let t0 = Date()
             do {
                 let session = LanguageModelSession(model: CloudProviderModel(config: cfg),
@@ -104,7 +107,8 @@ public final class FMReranker {
     public func rerankQuick(context: String, code: String, candidates: [String],
                             allowCloud: Bool) async -> Int? {
         guard candidates.count > 1 else { return nil }
-        let instructions = "你是香港繁體速成輸入法的候選推薦引擎。根據上文、速成碼和候選列表，選出最符合語境的一項。只能選列表內已有候選。只輸出序號數字，不要解釋。"
+        let instructions = ModelPrefs.promptOverride(ModelPrefs.promptQuickRerankKey)
+            ?? Self.defaultQuickRerankInstructions
         let numbered = candidates.enumerated().map { "\($0.offset + 1).\($0.element)" }.joined(separator: " ")
         let prompt = "上文：\(context.isEmpty ? "（句首）" : context)\n速成碼：\(code)\n候選：\(numbered)"
         guard let response = await respond(label: "速成推薦", instructions: instructions,
@@ -141,22 +145,52 @@ public final class FMReranker {
     }
 
     /// FM 翻译(⌃F 面板): 含中文 → 译英,否则 → 译中;失败/不可用静默 nil
-    public func translate(_ text: String) async -> String? {
+    public func translate(_ text: String, mode: InputMethodMode = .pinyin,
+                          allowCloud: Bool? = nil, defaults: UserDefaults = .standard) async -> String? {
         guard !text.isEmpty else {
             DebugLog.log("FM 翻译跳过: 空输入")
             return nil
         }
-        let toEnglish = text.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
-        let instructions = toEnglish
-            ? (ModelPrefs.promptOverride(ModelPrefs.promptTranslateENKey) ?? Self.defaultTranslateENInstructions)
-            : (ModelPrefs.promptOverride(ModelPrefs.promptTranslateZHKey) ?? Self.defaultTranslateZHInstructions)
-        guard let out = await respond(label: toEnglish ? "翻译中→英" : "翻译→中",
-                                      instructions: instructions, prompt: text) else {
+        let plan = Self.translationPlan(text: text, mode: mode, allowCloud: allowCloud, defaults: defaults)
+        guard let out = await respond(label: plan.toEnglish ? "翻譯中→英" : "翻譯→中",
+                                      instructions: plan.instructions, prompt: text,
+                                      cloudOverride: plan.allowCloud, defaults: defaults) else {
             return nil
         }
         let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != text else { return nil }
         return trimmed
+    }
+
+    /// Unicode Han 包含擴展平面的漢字，不把速成擴展字誤當成外文。
+    public static func containsChinese(_ text: String) -> Bool {
+        text.range(of: "\\p{Han}", options: .regularExpression) != nil
+    }
+
+    struct TranslationPlan: Equatable {
+        let toEnglish: Bool
+        let instructions: String
+        let allowCloud: Bool
+    }
+
+    /// 純配置解析可用隔離偏好測試，不建立模型 session 或發送網絡請求。
+    static func translationPlan(text: String, mode: InputMethodMode, allowCloud: Bool? = nil,
+                                defaults: UserDefaults = .standard) -> TranslationPlan {
+        let toEnglish = containsChinese(text)
+        let key: String
+        let fallback: String
+        if mode == .quick {
+            key = toEnglish ? ModelPrefs.promptQuickTranslateENKey : ModelPrefs.promptQuickTranslateZHKey
+            fallback = toEnglish ? defaultQuickTranslateENInstructions : defaultQuickTranslateZHInstructions
+        } else {
+            key = toEnglish ? ModelPrefs.promptTranslateENKey : ModelPrefs.promptTranslateZHKey
+            fallback = toEnglish ? defaultTranslateENInstructions : defaultTranslateZHInstructions
+        }
+        let custom = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return TranslationPlan(toEnglish: toEnglish,
+            instructions: custom.flatMap { $0.isEmpty ? nil : $0 } ?? fallback,
+            allowCloud: allowCloud ?? defaults.bool(forKey: mode == .quick
+                ? QuickPrefs.translationCloudKey : ModelPrefs.cloudEnabledKey))
     }
 
     static func firstIndex(in text: String, upperBound: Int) -> Int? {

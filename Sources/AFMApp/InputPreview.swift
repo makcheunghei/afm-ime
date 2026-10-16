@@ -40,16 +40,9 @@ final class InputPreviewModel: ObservableObject {
         fullCharset = model.quickFullCharset
         learning = model.quickLearning
         pinyinStore = model.store
-        if quickEngine == nil {
-            let paths = [IMEInstaller.installedIMEURL(), model.engineBundleURL]
-                .map { $0.appendingPathComponent("Contents/Resources/quick.json") }
-                + [URL(fileURLWithPath: "Data/quick.json")]
-            for url in paths {
-                if let dictionary = try? QuickDictionary(url: url) {
-                    quickEngine = QuickEngine(dictionary: dictionary, defaults: AppModel.imeDefaults)
-                    break
-                }
-            }
+        if quickEngine == nil, let dictionary = model.quickDictionary {
+            quickEngine = QuickEngine(dictionary: dictionary, defaults: model.previewDefaults,
+                                      learningStore: model.quickLearningStore)
         }
         if self.mode != mode {
             self.mode = mode
@@ -143,7 +136,10 @@ struct InputPreview: View {
                     .font(.caption).foregroundStyle(.secondary)
                 shortcut("← →", "切換候選頁")
                 shortcut("1–9", "選字或選聯想")
-                shortcut("Enter", "輸出英文字元")
+                shortcut("⌃F", "翻譯目前字詞；1 選譯文")
+                shortcut("Space", "不確認翻譯")
+                shortcut("Enter", "輸出原文字碼")
+                shortcut("Esc", "返回原文字碼")
             } else {
                 Text("拼音候選條的字體及詞庫預覽。")
                     .font(.caption).foregroundStyle(.secondary)

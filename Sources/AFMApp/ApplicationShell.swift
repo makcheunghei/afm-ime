@@ -55,6 +55,18 @@ struct RootView: View {
                 }
             }
             .navigationTitle(model.tab.title)
+            .toolbar {
+                if [.settings, .dict, .user, .translate, .model].contains(model.tab) {
+                    ToolbarItem(placement: .primaryAction) {
+                        Picker("設定模式", selection: $model.settingsMode) {
+                            ForEach(InputSettingsMode.allCases) { mode in Text(mode.title).tag(mode) }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 216)
+                        .help("選擇要調整的模式，不會切換系統輸入來源")
+                    }
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Color(nsColor: .windowBackgroundColor))
         }

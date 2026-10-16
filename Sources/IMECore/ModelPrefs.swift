@@ -18,6 +18,27 @@ public enum ModelPrefs {
     public static let promptSentenceKey = "AFMFMPromptSentence"
     public static let promptTranslateENKey = "AFMFMPromptTranslateEN" // 中文→英
     public static let promptTranslateZHKey = "AFMFMPromptTranslateZH" // 外文→中
+    public static let promptQuickRerankKey = "AFMQuickPromptRerank"
+    public static let promptQuickTranslateENKey = "AFMQuickPromptTranslateEN"
+    public static let promptQuickTranslateZHKey = "AFMQuickPromptTranslateZH"
+
+    /// 不附帶設定內容；接收端自行讀取。測試使用隔離 defaults 時不可發送正式通知。
+    public static let configurationChanged = Notification.Name("moe.bemly.AfmIME.modelConfigurationChanged")
+
+    public static func postConfigurationChange() {
+        DistributedNotificationCenter.default().postNotificationName(configurationChanged,
+            object: nil, userInfo: nil, deliverImmediately: true)
+    }
+
+    /// 僅在記憶體比對請求配置，從不寫入日誌；涵蓋憑證及提示詞變更。
+    public static func requestConfiguration(defaults: UserDefaults = .standard) -> [String] {
+        let keys = [cloudEnabledKey, cloudProviderKey, cloudBaseURLKey, cloudAPIKeyKey,
+                    cloudModelKey, cloudFormatKey, promptRerankKey, promptSentenceKey,
+                    promptTranslateENKey, promptTranslateZHKey, promptQuickRerankKey,
+                    promptQuickTranslateENKey, promptQuickTranslateZHKey,
+                    QuickPrefs.aiKey, QuickPrefs.cloudKey, QuickPrefs.translationCloudKey]
+        return keys.map { defaults.object(forKey: $0).map { String(describing: $0) } ?? "" }
+    }
 
     /// Foundation Models 的自訂雲端模型接入只在 macOS 27 或以上提供。
     public static var supportsCloudModels: Bool {

@@ -92,7 +92,19 @@ struct TranslateView: View {
     }
 
     var body: some View {
-        SettingsPage(title: "翻譯", subtitle: "自動判斷中英方向，使用 Apple 模型翻譯。") {
+        SettingsPage(title: "翻譯", subtitle: model.settingsMode == .quick
+                     ? "速成模式翻譯繁體中文；可選擇本機模型或已設定的雲端連線。"
+                     : "自動判斷中英方向，使用拼音模式的模型設定。") {
+            if model.settingsMode == .quick {
+                SettingsSection(title: "翻譯方式", subtitle: "獨立翻譯設定，不依賴速成輸入的 AI 開關。") {
+                    SettingsRow(title: "使用雲端翻譯", detail: "關閉時只使用本機模型") {
+                        Toggle("使用雲端翻譯", isOn: $model.quickTranslationCloud).toggleStyle(.switch).labelsHidden()
+                            .disabled(!ModelPrefs.supportsCloudModels)
+                            .accessibilityLabel("速成使用雲端翻譯")
+                    }
+                }
+                SettingsNotice("雲端翻譯預設關閉；開啟後只向已設定的服務商傳送要翻譯的原文。")
+            }
             SettingsSection(title: "原文", subtitle: "方向自動：\(model.translateDirection)") {
                 VStack(alignment: .leading, spacing: 10) {
                     TextEditor(text: $model.translateInput)
@@ -146,7 +158,9 @@ struct TranslateView: View {
                 }
             }
 
-            SettingsNotice("自動識別中英方向。輸入內容後，按「翻譯」取得結果。")
+            SettingsNotice(model.settingsMode == .quick
+                           ? "速成翻譯支援繁體中文與外文互譯。雲端翻譯關閉時使用本機模型。"
+                           : "自動識別中英方向。輸入內容後，按「翻譯」取得結果。")
         }
         .onSubmit { model.submitTranslate() }
     }
@@ -166,7 +180,7 @@ struct ModelView: View {
     private var cloudAvailable: Bool { ModelPrefs.supportsCloudModels }
 
     var body: some View {
-        SettingsPage(title: "AI 模型", subtitle: "管理本機與雲端 AI 的連線，以及候選與翻譯提示詞。") {
+        SettingsPage(title: "AI 模型", subtitle: "管理共用雲端連線，以及目前模式的提示詞。") {
             cloudSection
             promptSections
         }
@@ -176,9 +190,23 @@ struct ModelView: View {
 
     private var cloudSection: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsSection(title: "雲端模型", subtitle: "共用雲端連線；速成的雲端開關於「輸入設定」獨立管理。") {
-                SettingsRow(title: "拼音使用雲端 AI", detail: "候選推薦及整句預測使用下方連線") {
-                    Toggle("拼音使用雲端 AI", isOn: $model.cloudEnabled).toggleStyle(.switch).labelsHidden()
+            SettingsSection(title: "雲端模型", subtitle: "兩種模式共用下方雲端連線，各自管理功能開關。") {
+                if model.settingsMode == .quick {
+                    SettingsRow(title: "速成候選推薦使用雲端 AI", detail: "只控制速成候選推薦，不控制翻譯") {
+                        Toggle("速成候選推薦使用雲端 AI", isOn: $model.quickCloud).toggleStyle(.switch).labelsHidden()
+                            .disabled(!model.quickAI)
+                            .accessibilityLabel("速成候選推薦使用雲端 AI")
+                    }
+                    Divider()
+                    SettingsRow(title: "速成使用雲端翻譯", detail: "獨立開關；只傳送要翻譯的原文") {
+                        Toggle("速成使用雲端翻譯", isOn: $model.quickTranslationCloud).toggleStyle(.switch).labelsHidden()
+                            .accessibilityLabel("速成使用雲端翻譯")
+                    }
+                } else {
+                    SettingsRow(title: "拼音使用雲端 AI", detail: "候選推薦、整句預測及翻譯使用下方連線") {
+                        Toggle("拼音使用雲端 AI", isOn: $model.cloudEnabled).toggleStyle(.switch).labelsHidden()
+                            .accessibilityLabel("拼音使用雲端 AI")
+                    }
                 }
                 Divider()
                 SettingsRow(title: "服務商", detail: "選擇後自動填入地址、格式及模型名") {
@@ -240,7 +268,7 @@ struct ModelView: View {
                 SettingsNotice("雲端 AI 需要 macOS 27 或以上；目前可使用本機 AI 及詞庫輸入。",
                                systemImage: "exclamationmark.triangle")
             }
-            SettingsNotice("啟用雲端 AI 後，字碼、候選及光標前的部分文字會傳送至所選服務商。遠端連線須使用 HTTPS；本機服務可使用 HTTP。")
+            SettingsNotice("雲端候選推薦會傳送字碼、候選及光標前的部分文字；雲端翻譯只傳送要翻譯的原文。遠端連線須使用 HTTPS；本機服務可使用 HTTP。")
         }
     }
 
@@ -248,6 +276,11 @@ struct ModelView: View {
 
     private var promptSections: some View {
         VStack(alignment: .leading, spacing: 24) {
+            if model.settingsMode == .quick {
+                promptSection(title: "提示詞 · 速成候選推薦", subtitle: "只輸出已有候選的序號；不能新增字詞。", text: $model.promptQuickRerank)
+                promptSection(title: "提示詞 · 中文→英文", subtitle: "速成行內翻譯與翻譯頁共用；只輸出譯文。", text: $model.promptQuickTranslateEN)
+                promptSection(title: "提示詞 · 外文→繁體中文", subtitle: "速成行內翻譯與翻譯頁共用；預設使用香港繁體中文。", text: $model.promptQuickTranslateZH)
+            } else {
             promptSection(title: "提示詞 · 候選重排",
                           subtitle: "只輸出序號數字；請保留格式約束，輸出無法解析時會自動回退詞典。",
                           text: $model.promptRerank)
@@ -260,9 +293,10 @@ struct ModelView: View {
             promptSection(title: "提示詞 · 翻譯(外文→中)",
                           subtitle: "只輸出譯文；與翻譯頁共用同一份設定。",
                           text: $model.promptTranslateZH)
+            }
 
             SettingsSection(title: "提示詞操作",
-                            subtitle: "編輯只停留在草稿，按「套用提示詞」才寫入並即時生效；與內置預設一致的段落不落盤，可跟隨程式更新。") {
+                            subtitle: "只套用目前模式草稿；與內置預設一致的段落不落盤，可跟隨程式更新。") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
                         Button("套用提示詞") { model.applyPrompts() }
@@ -307,9 +341,9 @@ struct TestView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        SettingsPage(title: "實驗功能", subtitle: "試用候選條的新互動方式，下一次拖拽即會生效。") {
-            SettingsSection(title: "水滴拖拽",
-                            subtitle: "只影響拼音候選條的選中水滴；內聯翻譯等其餘功能不受影響。") {
+        SettingsPage(title: "實驗功能", subtitle: "拼音專用互動功能；下一次拖拽即會生效。") {
+            SettingsSection(title: "拼音水滴拖拽",
+                            subtitle: "只影響拼音候選條的選中水滴。") {
                 SettingsRow(title: "固定透鏡拖拽", detail: "水滴釘在螢幕抓取點，候選條隨手指平移滑過。") {
                     Toggle("固定透鏡拖拽", isOn: $model.dropletFixedLens).toggleStyle(.switch).labelsHidden()
                 }

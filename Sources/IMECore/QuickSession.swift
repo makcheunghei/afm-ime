@@ -108,6 +108,13 @@ public final class QuickSession {
         return text.isEmpty ? nil : text
     }
 
+    /// 剪貼簿插入一次提交原英文與外來文字；聯想只關窗，不隱式選字。
+    public func insertExternalText(_ text: String) -> QuickResult {
+        let original = finishComposition() ?? ""
+        let combined = original + text
+        return QuickResult(consumed: true, commits: combined.isEmpty ? [] : [combined])
+    }
+
     /// 開關變動：現行字碼即時重查表、generation 增、選中項回到當頁首項。
     public func updateOptions(fullCharset: Bool, learning: Bool) {
         guard self.fullCharset != fullCharset || self.learning != learning else { return }

@@ -35,17 +35,17 @@ public struct CloudProviderModel: LanguageModel {
     public var executorConfiguration: Config { config }
 
     /// 从 ModelPrefs 读配置;URL 无 host 或 scheme 非 http(s) 视为未配置(返回 nil → 走端侧)
-    public static func configured() -> Config? {
-        let raw = UserDefaults.standard.string(forKey: ModelPrefs.cloudBaseURLKey) ?? ""
+    public static func configured(defaults: UserDefaults = .standard) -> Config? {
+        let raw = defaults.string(forKey: ModelPrefs.cloudBaseURLKey) ?? ""
         guard !raw.isEmpty, let url = URL(string: raw), let host = url.host, !host.isEmpty,
               let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme),
-              let model = UserDefaults.standard.string(forKey: ModelPrefs.cloudModelKey), !model.isEmpty
+              let model = defaults.string(forKey: ModelPrefs.cloudModelKey), !model.isEmpty
         else { return nil }
         return Config(
             baseURL: url,
             modelName: model,
-            apiKey: UserDefaults.standard.string(forKey: ModelPrefs.cloudAPIKeyKey) ?? "",
-            wireFormat: ModelPrefs.cloudFormat)
+            apiKey: defaults.string(forKey: ModelPrefs.cloudAPIKeyKey) ?? "",
+            wireFormat: defaults.string(forKey: ModelPrefs.cloudFormatKey) == "anthropic" ? "anthropic" : "openai")
     }
 
     /// 设置中心「测试连接」:最小请求往返,返回人读结果(✓/✗ + 耗时)

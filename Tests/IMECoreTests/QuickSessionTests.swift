@@ -53,7 +53,9 @@ struct QuickSessionTests {
             associations: associations ?? windowsAssociations,
             roots: roots ?? windowsRoots
         )
-        let engine = QuickEngine(dictionary: dictionary, defaults: defaults)
+        let lock = FileManager.default.temporaryDirectory.appendingPathComponent("QuickSessionTests-\(UUID().uuidString).lock")
+        let engine = QuickEngine(dictionary: dictionary, defaults: defaults,
+                                 learningStore: QuickLearningStore(defaults: defaults, lockURL: lock))
         return (QuickSession(engine: engine, fullCharset: fullCharset, learning: learning), defaults)
     }
 

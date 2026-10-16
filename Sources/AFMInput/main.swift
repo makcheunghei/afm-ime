@@ -128,6 +128,22 @@ func checkQuickData() -> Int32 {
           session.handle(.separator(".")).commits == ["."], !session.isAssociation else {
         print("中文選字後半形標點驗證失敗"); return 1
     }
+    let translation = QuickTranslationSession(session: session)
+    for letter in "aa" { _ = session.handle(.letter(letter)) }
+    _ = session.handle(.nextPage)
+    let selected = session.selectedIndex
+    guard let request = translation.begin(), request.source == aa[selected],
+          translation.complete("test translation", for: request),
+          translation.handle(.space)?.commits.isEmpty == true,
+          translation.handle(.escape)?.consumed == true,
+          session.pageStart == 9, session.selectedIndex == selected else {
+        print("速成翻譯狀態／取消後恢復候選失敗"); return 1
+    }
+    guard let next = translation.begin(), translation.complete("test translation", for: next),
+          translation.handle(.digit(1, shifted: false))?.commits == ["test translation"],
+          session.rawText.isEmpty, !session.isAssociation else {
+        print("速成翻譯確認失敗"); return 1
+    }
     let start = Date()
     let lookupCodes = ["aa", "of", "ha", "hu", "a", "za", "bu", "ub", "nx", "ux"]
     var checkedCandidates = 0
@@ -135,7 +151,7 @@ func checkQuickData() -> Int32 {
         checkedCandidates &+= engine.candidates(for: lookupCodes[index % lookupCodes.count], fullCharset: true).count
     }
     let averageMS = Date().timeIntervalSince(start) * 1000 / 10_000
-    print("速成驗證通過：英文 Enter 及大小寫、單碼空白出字、雙碼空白翻頁、gmail.com 分隔符／Delete 確認、半形標點、ma1 選百、中文字碼逐字刪除、aa 18 字、六組聯想、普通數字選聯想、完整字集及 Unicode")
+    print("速成驗證通過：英文 Enter 及大小寫、單碼空白出字、雙碼空白翻頁、gmail.com 分隔符／Delete 確認、半形標點、ma1 選百、中文字碼逐字刪除、aa 18 字、六組聯想、普通數字選聯想、完整字集、Unicode、翻譯確認及取消後恢復原頁（假模型回覆）")
     print(String(format: "全字集查表平均 %.4f ms（10,000 次，候選數校驗 %d）", averageMS, checkedCandidates))
     return 0
 }
@@ -143,7 +159,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261016-audit4"
+    static let buildTag = "20261016-quick-phase2"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端

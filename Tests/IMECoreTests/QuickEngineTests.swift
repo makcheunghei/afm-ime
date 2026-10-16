@@ -53,7 +53,7 @@ struct QuickEngineTests {
     @Test func learningDisabledDoesNotWriteAndEnabledOnlyChangesQuickLearningKey() throws {
         let defaults = try isolatedDefaults()
         let dictionary = QuickDictionary(candidates: ["ab": ["甲", "乙"]])
-        let engine = QuickEngine(dictionary: dictionary, defaults: defaults)
+        let engine = QuickEngine(dictionary: dictionary, defaults: defaults, learningStore: learningStore(defaults))
         defaults.set(["preserve": 7], forKey: "unrelated")
         defaults.set(["old": 3], forKey: "AFMUserFreq")
         let before = defaults.dictionaryRepresentation()
@@ -71,7 +71,8 @@ struct QuickEngineTests {
     @Test func learningRanksPositiveCountsAndPreservesTiesAndDisabledOrder() throws {
         let defaults = try isolatedDefaults()
         defaults.set(["ab": ["乙": 2, "丙": 2, "甲": 0]], forKey: QuickPrefs.learningDataKey)
-        let engine = QuickEngine(dictionary: QuickDictionary(candidates: ["ab": ["甲", "乙", "丙"]]), defaults: defaults)
+        let engine = QuickEngine(dictionary: QuickDictionary(candidates: ["ab": ["甲", "乙", "丙"]]),
+                                 defaults: defaults, learningStore: learningStore(defaults))
 
         #expect(engine.candidates(for: "ab") == ["甲", "乙", "丙"])
         #expect(engine.candidates(for: "ab", learning: true) == ["乙", "丙", "甲"])
@@ -89,5 +90,10 @@ struct QuickEngineTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defaults.removePersistentDomain(forName: name)
         return defaults
+    }
+
+    private func learningStore(_ defaults: UserDefaults) -> QuickLearningStore {
+        QuickLearningStore(defaults: defaults, lockURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("QuickEngineTests-\(UUID().uuidString).lock"))
     }
 }
