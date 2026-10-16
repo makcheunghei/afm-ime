@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import IMECore
 
-/// 速成候選／聯想共用精簡單欄。玻璃只由外層 NSGlassEffectView 提供，選中列不疊玻璃。
+/// 速成候選／聯想共用直排及橫排。玻璃由外層提供，排列不影響選字和翻頁。
 struct QuickCandidateView: View {
     var items: [CandidateItem]
     var selectedIndex: Int
@@ -10,6 +10,9 @@ struct QuickCandidateView: View {
     var pageSize: Int
     var association: Bool
     var translation: QuickTranslationSession.Phase? = nil
+    var layout: QuickCandidateLayout = .vertical
+    var maximumWidth: CGFloat = 1200
+    var fontSize: CGFloat = 16
     var onSelect: (Int) -> Void
 
     private var pageLength: Int { max(1, min(pageSize, QuickSession.pageSize)) }
@@ -18,8 +21,10 @@ struct QuickCandidateView: View {
     }
     private var pageNumber: Int { pageStart / pageLength + 1 }
     private var pageCount: Int { max(1, (items.count + pageLength - 1) / pageLength) }
-    private var fontSize: CGFloat { CGFloat(UserPrefs.candidateFontSize) }
-    private var columnWidth: CGFloat {
+    private var panelWidth: CGFloat {
+        min(max(1, maximumWidth), preferredWidth)
+    }
+    private var preferredWidth: CGFloat {
         let font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
         if let translation {
             switch translation {
@@ -29,9 +34,34 @@ struct QuickCandidateView: View {
             default: return 180
             }
         }
+        if layout == .horizontal {
+            return max(120, horizontalCellWidths.reduce(0, +) + 16 + CGFloat(max(0, visibleItems.count - 1)) * 2)
+        }
         let textWidth = visibleItems.map { ($0.text as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
         let recommendationWidth: CGFloat = visibleItems.contains(where: \.isAI) ? 14 : 0
         return min(280, max(120, ceil(textWidth) + 56 + recommendationWidth))
+    }
+
+    private var horizontalCellWidths: [CGFloat] {
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let natural = visibleItems.map { item in
+            min(180, max(44, ceil((item.text as NSString).size(withAttributes: [.font: font]).width)
+                         + 35 + (item.isAI ? 19 : 0)))
+        }
+        return Self.fittedWidths(natural, available: max(1, maximumWidth - 16 - CGFloat(max(0, natural.count - 1)) * 2))
+    }
+
+    /// 空間不足時只收窄較長候選，保留短字寬度；仍顯示同一頁全部項目。
+    static func fittedWidths(_ natural: [CGFloat], available: CGFloat) -> [CGFloat] {
+        guard !natural.isEmpty, natural.reduce(0, +) > available else { return natural }
+        var lower: CGFloat = 0
+        var upper = natural.max() ?? 0
+        for _ in 0..<24 {
+            let limit = (lower + upper) / 2
+            if natural.reduce(0, { $0 + min($1, limit) }) > available { upper = limit }
+            else { lower = limit }
+        }
+        return natural.map { min($0, lower) }
     }
 
     var body: some View {
@@ -58,6 +88,15 @@ struct QuickCandidateView: View {
                             .fixedSize(horizontal: false, vertical: true).padding(9)
                     case .idle: EmptyView()
                     }
+                } else if layout == .horizontal {
+                    let widths = horizontalCellWidths
+                    HStack(spacing: 2) {
+                        ForEach(visibleItems) { item in
+                            candidate(item)
+                                .frame(width: widths[item.index - pageStart])
+                                .clipped()
+                        }
+                    }
                 } else {
                     ForEach(visibleItems) { item in candidate(item) }
                 }
@@ -65,7 +104,7 @@ struct QuickCandidateView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 9)
-        .frame(width: columnWidth, alignment: .leading)
+        .frame(width: panelWidth, alignment: .leading)
         .foregroundStyle(.primary)
         .background(.clear)
     }
@@ -73,7 +112,7 @@ struct QuickCandidateView: View {
     @ViewBuilder
     private func candidate(_ item: CandidateItem, isTranslation: Bool = false) -> some View {
         Button { onSelect(item.index) } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: layout == .horizontal && !isTranslation ? 5 : 10) {
                 Text(numberLabel(for: item))
                     .font(.system(size: 11))
                     .monospacedDigit()

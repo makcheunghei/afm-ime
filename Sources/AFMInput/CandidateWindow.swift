@@ -895,21 +895,23 @@ final class CandidateWindowController {
     func showQuick(items: [CandidateItem], selectedIndex: Int, pageStart: Int,
                    pageSize: Int = 9, association: Bool,
                    translation: QuickTranslationSession.Phase? = nil,
+                   layout: QuickCandidateLayout? = nil,
                    caretRect: NSRect, onSelect: @escaping (Int) -> Void) {
         panel?.orderOut(nil)
         onFrameChange?(nil)
         let panel = ensureQuickPanel()
         guard let host = quickHost, let container = quickContainerView,
               let glass = quickGlassView else { return }
-
-        host.rootView = QuickCandidateView(
-            items: items, selectedIndex: selectedIndex, pageStart: pageStart,
-            pageSize: pageSize, association: association, translation: translation, onSelect: onSelect)
-
-        let desired = host.fittingSize
         let screen = screen(for: caretRect)
         let visible = screen?.visibleFrame ?? NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        host.rootView = QuickCandidateView(
+            items: items, selectedIndex: selectedIndex, pageStart: pageStart,
+            pageSize: pageSize, association: association, translation: translation,
+            layout: layout ?? QuickPrefs.candidateLayout(), maximumWidth: max(1, visible.width - 8),
+            fontSize: CGFloat(min(22, max(13, UserPrefs.candidateFontSize))), onSelect: onSelect)
+
+        let desired = host.fittingSize
         let size = NSSize(width: min(desired.width, visible.width),
                           height: min(desired.height, visible.height))
         panel.setContentSize(size)

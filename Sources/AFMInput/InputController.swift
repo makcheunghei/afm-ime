@@ -40,6 +40,7 @@ final class InputController: IMKInputController {
     private var quickTranslationTask: Task<Void, Never>?
     private var quickTranslationConfiguration: [String]?
     private var modelConfigurationObserver: NSObjectProtocol?
+    private var quickAppearanceObserver: NSObjectProtocol?
     private var quickScheduledGeneration: UInt64?
     private var quickActive = false
 
@@ -170,6 +171,12 @@ final class InputController: IMKInputController {
                     self.renderQuick(self.client())
                 }
             }
+        quickAppearanceObserver = DistributedNotificationCenter.default().addObserver(
+            forName: QuickPrefs.appearanceChanged, object: nil, queue: .main) { [weak self] _ in
+                guard let self, self.inputMode == .quick, self.quickActive, Self.lastActive === self else { return }
+                // 只重排畫面，不修改候選次序、翻頁位置、翻譯或 AI 請求。
+                self.renderQuick(self.client())
+            }
         candidateWindow.onFrameChange = { frame in
             Self.latestCandidateFrame = frame ?? .null
             CompanionPanels.repositionAll()
@@ -192,6 +199,9 @@ final class InputController: IMKInputController {
         quickTranslationTask?.cancel()
         if let modelConfigurationObserver {
             DistributedNotificationCenter.default().removeObserver(modelConfigurationObserver)
+        }
+        if let quickAppearanceObserver {
+            DistributedNotificationCenter.default().removeObserver(quickAppearanceObserver)
         }
     }
 

@@ -246,6 +246,31 @@ struct AppModelTests {
         #expect(AppModel.resolvedHotkeyCode(stored: nil, fallback: 3) == 3)
     }
 
+    @Test func candidateLayoutPersistsWithoutChangingTypingOptionsOrCancellingTranslation() async throws {
+        let (defaults, suite) = isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("future-unknown-layout", forKey: QuickPrefs.candidateLayoutKey)
+        let gate = ReplyGate()
+        let model = AppModel(defaults: defaults, translate: { text in await gate.reply(for: text) }, loadDictionary: false)
+        #expect(model.quickCandidateLayout == .vertical)
+        model.translateInput = "hello"
+        model.submitTranslate()
+        await gate.waitUntilPending("hello")
+        let task = try #require(model.translateTask)
+        let before = defaults.dictionaryRepresentation()
+        model.quickCandidateLayout = .horizontal
+        #expect(!task.isCancelled)
+        #expect(QuickPrefs.candidateLayout(defaults: defaults) == .horizontal)
+        for (key, value) in before where key != QuickPrefs.candidateLayoutKey {
+            #expect(NSDictionary(dictionary: [key: value]) == NSDictionary(dictionary: [key: defaults.object(forKey: key)!]))
+        }
+        let reopened = AppModel(defaults: defaults, translate: { _ in nil }, loadDictionary: false)
+        #expect(reopened.quickCandidateLayout == .horizontal)
+        await gate.resolve("hello", with: "你好")
+        await task.value
+        #expect(model.translateResult == "你好")
+    }
+
     @Test func firstModeSwitchKeepsExistingCustomPromptsAndResetOnlyAffectsCurrentMode() {
         let (defaults, suite) = isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

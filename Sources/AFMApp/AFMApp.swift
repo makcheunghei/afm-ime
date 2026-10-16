@@ -140,6 +140,14 @@ final class AppModel: ObservableObject {
     @Published var fmEnhance: Bool { didSet { write("AFMFMEnhance", fmEnhance) } }
     @Published var userFreqEnabled: Bool { didSet { write("AFMUserFreqEnabled", userFreqEnabled) } }
     @Published var quickFullCharset: Bool { didSet { write(QuickPrefs.fullCharsetKey, quickFullCharset) } }
+    @Published var quickCandidateLayout: QuickCandidateLayout {
+        didSet {
+            guard quickCandidateLayout != oldValue else { return }
+            defaults.set(quickCandidateLayout.rawValue, forKey: QuickPrefs.candidateLayoutKey)
+            defaults.synchronize()
+            if broadcastsConfigurationChanges { QuickPrefs.postAppearanceChange() }
+        }
+    }
     @Published var quickLearning: Bool { didSet { write(QuickPrefs.learningKey, quickLearning) } }
     @Published var quickAI: Bool { didSet { write(QuickPrefs.aiKey, quickAI) } }
     @Published var quickCloud: Bool { didSet { write(QuickPrefs.cloudKey, quickCloud) } }
@@ -412,6 +420,7 @@ final class AppModel: ObservableObject {
         fmEnhance = d.object(forKey: "AFMFMEnhance") as? Bool ?? true
         userFreqEnabled = d.object(forKey: "AFMUserFreqEnabled") as? Bool ?? true
         quickFullCharset = d.bool(forKey: QuickPrefs.fullCharsetKey)
+        quickCandidateLayout = QuickPrefs.candidateLayout(defaults: d)
         quickLearning = d.bool(forKey: QuickPrefs.learningKey)
         quickAI = d.bool(forKey: QuickPrefs.aiKey)
         quickCloud = d.bool(forKey: QuickPrefs.cloudKey)

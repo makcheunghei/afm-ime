@@ -12,7 +12,7 @@ struct SettingsView: View {
                                        subtitle: model.settingsMode == .quick
                                        ? "保留熟悉的選字次序，中文英文自然接續。"
                                        : "拼音輸入、個人詞語與 AI 輔助。")
-                    if geometry.size.width >= 870 {
+                    if geometry.size.width >= 870 && !horizontalPreview {
                         HStack(alignment: .top, spacing: 28) {
                             settingsForm.frame(maxWidth: .infinity)
                             previewColumn.frame(width: 240)
@@ -22,7 +22,7 @@ struct SettingsView: View {
                     } else {
                         settingsForm
                         Divider()
-                        previewColumn.frame(maxWidth: 420, alignment: .leading)
+                        previewColumn.frame(maxWidth: horizontalPreview ? .infinity : 420, alignment: .leading)
                     }
                 }
                 .frame(maxWidth: 1060, alignment: .leading)
@@ -39,7 +39,12 @@ struct SettingsView: View {
     }
 
     private var previewColumn: some View {
-        InputPreview(preview: model.preview, mode: model.settingsMode, fontSize: model.fontSize)
+        InputPreview(preview: model.preview, mode: model.settingsMode, fontSize: model.fontSize,
+                     quickLayout: model.quickCandidateLayout)
+    }
+
+    private var horizontalPreview: Bool {
+        model.settingsMode == .quick && model.quickCandidateLayout == .horizontal
     }
 
     private var settingsForm: some View {
@@ -50,6 +55,17 @@ struct SettingsView: View {
                 SettingsNotice("啟用雲端 AI 會向指定服務商傳送字碼、候選及光標前的部分文字。連線於「AI 模型」管理。")
             }
             SettingsSection(title: "外觀") {
+                if model.settingsMode == .quick {
+                    SettingsRow(title: "候選排列", detail: "中文字及聯想共用；每頁最多 9 項") {
+                        Picker("速成候選排列", selection: $model.quickCandidateLayout) {
+                            ForEach(QuickCandidateLayout.allCases) { layout in
+                                Text(layout.title).tag(layout)
+                            }
+                        }
+                        .pickerStyle(.segmented).frame(width: 160)
+                    }
+                    Divider()
+                }
                 SettingsRow(title: "候選字體") {
                     HStack(spacing: 10) {
                         Slider(value: $model.fontSize, in: 13...22, step: 1)

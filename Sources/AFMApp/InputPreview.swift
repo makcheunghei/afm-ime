@@ -91,6 +91,7 @@ struct InputPreview: View {
     @FocusState private var candidatesFocused: Bool
     let mode: InputSettingsMode
     let fontSize: Double
+    var quickLayout: QuickCandidateLayout = .vertical
 
     private struct PreviewCandidate: Identifiable {
         let index: Int
@@ -127,12 +128,12 @@ struct InputPreview: View {
                 }
             }
             .padding(18)
-            .frame(maxWidth: .infinity, minHeight: mode == .quick ? 405 : 160, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: mode == .quick && quickLayout == .vertical ? 405 : 160, alignment: .topLeading)
             .fixedSize(horizontal: false, vertical: true)
             .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 12))
             .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5) }
             if mode == .quick {
-                Text("每頁 9 個候選 · 單欄排列")
+                Text("每頁最多 9 個候選 · \(quickLayout.title)")
                     .font(.caption).foregroundStyle(.secondary)
                 shortcut("← →", "切換候選頁")
                 shortcut("1–9", "選字或選聯想")
@@ -157,17 +158,21 @@ struct InputPreview: View {
                 Text("\(preview.page + 1)/\(preview.pageCount)").monospacedDigit()
             }
             .font(.caption).padding(.horizontal, 8).padding(.bottom, 5)
-            ForEach(visibleCandidates) { candidate in
+            let layout = quickLayout == .horizontal
+                ? AnyLayout(HStackLayout(spacing: 2)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 3))
+            layout {
+              ForEach(visibleCandidates) { candidate in
                 let index = candidate.index
                 Button {
                     preview.select(index)
                     candidatesFocused = true
                 } label: {
-                    HStack(spacing: 12) {
+                    HStack(spacing: quickLayout == .horizontal ? 5 : 12) {
                         Text("\(index % preview.pageSize + 1)")
                             .font(.system(size: 11)).frame(width: 10)
                         Text(preview.candidates[index])
                             .font(.system(size: fontSize, weight: preview.selectedIndex == index ? .semibold : .regular))
+                            .lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 9).padding(.vertical, 4)
@@ -178,11 +183,13 @@ struct InputPreview: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("候選 \(index % preview.pageSize + 1)，\(preview.candidates[index])")
                 .accessibilityAddTraits(preview.selectedIndex == index ? [.isSelected] : [])
+              }
             }
         }
         .foregroundStyle(.primary)
         .padding(9)
-        .frame(width: 152)
+        .frame(width: quickLayout == .vertical ? 152 : nil)
+        .frame(maxWidth: quickLayout == .horizontal ? .infinity : nil)
         .glassEffect(.regular, in: .rect(cornerRadius: 14))
         .focusable()
         .focused($candidatesFocused)

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+import IMECore
 @testable import afm_input
 
 @Suite(.serialized)
@@ -20,21 +21,26 @@ struct CandidateWindowTests {
         #expect(!panel.isKeyWindow)
     }
 
-    @Test func quickPanelShowsAtMostNineRowsAndResizesLastPage() {
+    @Test(arguments: QuickCandidateLayout.allCases)
+    func quickPanelShowsAtMostNineItemsAndResizesLastPage(layout: QuickCandidateLayout) {
         _ = NSApplication.shared
         let controller = CandidateWindowController()
         defer { controller.hide() }
         let items = (0..<11).map { CandidateItem(index: $0, text: "字\($0)", isAI: false) }
         controller.showQuick(items: items, selectedIndex: 0, pageStart: 0,
-                             association: false, caretRect: .null, onSelect: { _ in })
+                             association: false, layout: layout, caretRect: .null, onSelect: { _ in })
         let firstPage = controller.currentFrame
         controller.showQuick(items: items, selectedIndex: 9, pageStart: 9,
-                             association: false, caretRect: .null, onSelect: { _ in })
+                             association: false, layout: layout, caretRect: .null, onSelect: { _ in })
         let lastPage = controller.currentFrame
         #expect(firstPage.width >= 120)
-        #expect(firstPage.height > lastPage.height)
-        #expect(firstPage.height - lastPage.height >= 7 * 28)
-        #expect(lastPage.height > 2 * 28)
+        if layout == .vertical {
+            #expect(firstPage.height - lastPage.height >= 7 * 28)
+            #expect(lastPage.height > 2 * 28)
+        } else {
+            #expect(firstPage.width > lastPage.width)
+            #expect(firstPage.height == lastPage.height)
+        }
     }
 
     @Test func candidateIdentitySurvivesAIReranking() {
