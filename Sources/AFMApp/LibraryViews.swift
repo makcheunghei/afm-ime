@@ -57,9 +57,9 @@ struct DictView: View {
                     .padding(24)
                 } else if model.dictRows.isEmpty {
                     SettingsEmptyState(
-                        title: model.dictSearch.isEmpty ? "詞庫暫無內容" : "找不到相符詞條",
+                        title: model.isSearchingDict ? "找不到相符詞條" : "詞庫暫無內容",
                         systemImage: "magnifyingglass",
-                        description: model.dictSearch.isEmpty
+                        description: !model.isSearchingDict
                             ? "目前沒有可顯示的詞條。"
                             : "試試其他拼音前綴，例如 nihao、nh 或 meibeng。"
                     )
@@ -90,7 +90,7 @@ struct DictView: View {
 
     private var pageFooter: some View {
         HStack(spacing: 12) {
-            if model.dictSearch.isEmpty {
+            if !model.isSearchingDict {
                 Button("上一頁") {
                     if model.dictPage > 0 { model.dictPage -= 1 }
                 }

@@ -95,6 +95,7 @@ final class InputController: IMKInputController {
     private var selectedIndex = 0                         // 全局选中下标
     private var aiBoostText: String?                      // FM 提到首位的词
     private var fmGeneration = 0                          // FM 请求代际(防陈旧结果回写)
+    private var fmTask: Task<Void, Never>?
     private var shiftDown = false                         // shift 按住中(flagsChanged)
     private var shiftUsed = false                         // 按住期间按过其他键 → 松开不算轻点
     private var quoteOpenSingle = false                   // '' 成对交替
@@ -157,12 +158,13 @@ final class InputController: IMKInputController {
             Self.latestCandidateFrame = frame ?? .null
             CompanionPanels.repositionAll()
         }
-        dropletModel.onDrop = { [weak self] fraction in // 水滴松手:吸附最近候选上屏
-            guard let self, !self.candidates.isEmpty else { return }
-            self.dropletModel.reset()
-            let idx = max(0, min(self.candidates.count - 1, Int(fraction.rounded())))
+        dropletModel.onDrop = { fraction in // 共用水滴必須路由到目前活躍客戶端，而非最後建立的 controller。
+            guard let controller = Self.lastActive, controller.inputMode == .pinyin,
+                  !controller.candidates.isEmpty else { return }
+            controller.dropletModel.reset()
+            let idx = max(0, min(controller.candidates.count - 1, Int(fraction.rounded())))
             DebugLog.log("水滴松手 → 上屏 idx=\(idx) (fraction=\(String(format: "%.2f", fraction)))")
-            self.commitCandidate(at: idx, client: self.client())
+            controller.commitCandidate(at: idx, client: controller.client())
         }
         dropletModel.onPanelShift = { originX in // 固定透镜拖拽:整条 bar(面板)刚体平移
             Self.lastActive?.candidateWindow.shiftPanel(toOriginX: originX)
@@ -188,6 +190,7 @@ final class InputController: IMKInputController {
     override func deactivateServer(_ sender: Any!) {
         quickActive = false
         quickTask?.cancel()
+        fmTask?.cancel()
         if compositionSuspended {
             // 翻译面板抢焦点所致:组词挂起中,不提交不上屏(状态留在内存,activateServer 恢复)
             DebugLog.log("deactivateServer(组词挂起中,不提交) raw='\(raw)'")
@@ -474,6 +477,7 @@ final class InputController: IMKInputController {
         else if !raw.isEmpty { flush(firstChoiceText, client: client) }
         quickTask?.cancel()
         quickScheduledGeneration = nil
+        fmTask?.cancel()
         fmGeneration &+= 1
         candidateWindow.hide()
         inputMode = mode
@@ -665,7 +669,7 @@ final class InputController: IMKInputController {
         }
         if composing {
             DebugLog.log("标点 '\(chars)' → 上屏首选 + 全角 '\(fw)'")
-            flush(candidates.first?.text ?? raw, client: client)
+            flush(firstChoiceText, client: client)
         } else {
             DebugLog.log("标点 '\(chars)' → 全角 '\(fw)'")
         }
@@ -781,6 +785,7 @@ final class InputController: IMKInputController {
         for c in liveControllers.allObjects where !c.raw.isEmpty {
             c.compositionSuspended = true
             c.fmGeneration &+= 1 // 掐掉在途 FM,防止面板期间结果回写重开候选窗
+            c.fmTask?.cancel()
             c.candidateWindow.hide()
             DebugLog.log("组词挂起(面板抢键盘) raw='\(c.raw)'")
         }
@@ -994,6 +999,8 @@ final class InputController: IMKInputController {
         candidates = []
         aiBoostText = nil
         fmGeneration &+= 1
+        fmTask?.cancel()
+        fmTask = nil
         undoStack.removeAll()
         committedBuffer = ""
         committedKeys.removeAll()
@@ -1012,11 +1019,12 @@ final class InputController: IMKInputController {
     // MARK: - FM 异步重排(0.4s 防抖;结果到达时若组词已变则丢弃)
 
     private func scheduleFMRerank(_ client: Any!) {
+        fmTask?.cancel()
+        fmGeneration &+= 1
         guard UserPrefs.fmEnhance else {
             DebugLog.log("FM 增强关 → 跳过重排/整句")
             return
         }
-        fmGeneration &+= 1
         let gen = fmGeneration
         let snapshotRaw = raw              // 过期判定用(含英文字尾)
         let snapshotPinyin = pinyinPart    // 发给模型的拼音(不含字尾,模型只认音节串)
@@ -1031,11 +1039,14 @@ final class InputController: IMKInputController {
         }
         DebugLog.log("FM 排队 gen=\(gen) 模式=\(needSentence ? "整句" : "重排") 上文='\(context)' 拼音='\(snapshotPinyin)' 候选=\(texts)")
 
-        Task { [weak self] in
+        fmTask = Task { [weak self] in
             // 整句预测立即触发(词典覆盖不足正是需要整句的时机);候选重排保持 400ms 防抖
-            try? await Task.sleep(nanoseconds: needSentence ? 50_000_000 : 400_000_000)
-            guard let self else { return }
-            let stillCurrent = await MainActor.run { self.raw == snapshotRaw && self.fmGeneration == gen }
+            do { try await Task.sleep(nanoseconds: needSentence ? 50_000_000 : 400_000_000) }
+            catch { return }
+            guard !Task.isCancelled, let self else { return }
+            let stillCurrent = await MainActor.run {
+                self.raw == snapshotRaw && self.fmGeneration == gen && UserPrefs.fmEnhance
+            }
             guard stillCurrent else {
                 DebugLog.log("FM 结果丢弃 gen=\(gen)(组词已变化)")
                 return
@@ -1045,7 +1056,8 @@ final class InputController: IMKInputController {
                     DebugLog.log("FM 整句无结果 gen=\(gen)")
                     await MainActor.run {
                         // 占位中的窗口:整句失败且仍无词典候选 → 收起占位
-                        if self.raw == snapshotRaw, self.fmGeneration == gen, self.candidates.isEmpty {
+                        if !Task.isCancelled, self.raw == snapshotRaw, self.fmGeneration == gen,
+                           UserPrefs.fmEnhance, self.candidates.isEmpty {
                             DebugLog.log("FM 整句失败 → 收起占位")
                             self.candidateWindow.hide()
                         }
@@ -1053,7 +1065,8 @@ final class InputController: IMKInputController {
                     return
                 }
                 await MainActor.run {
-                    guard self.raw == snapshotRaw, self.fmGeneration == gen else {
+                    guard !Task.isCancelled, self.raw == snapshotRaw, self.fmGeneration == gen,
+                          UserPrefs.fmEnhance else {
                         DebugLog.log("FM 整句过期丢弃 gen=\(gen)")
                         return
                     }
@@ -1066,7 +1079,8 @@ final class InputController: IMKInputController {
                     return
                 }
                 await MainActor.run {
-                    guard self.raw == snapshotRaw, self.fmGeneration == gen,
+                    guard !Task.isCancelled, self.raw == snapshotRaw, self.fmGeneration == gen,
+                          UserPrefs.fmEnhance,
                           best < texts.count else {
                         DebugLog.log("FM 结果过期丢弃 gen=\(gen)")
                         return

@@ -5,10 +5,18 @@ import Foundation
 public final class CandidateEngine {
     public let store: DictStore
     public let segmenter: PinyinSegmenter
+    private let userFreq: UserFreq
+    private let userFreqEnabled: () -> Bool
+    private let fuzzyPinyinEnabled: () -> Bool
 
-    public init(store: DictStore) {
+    public init(store: DictStore, userFreq: UserFreq? = nil,
+                userFreqEnabled: (() -> Bool)? = nil,
+                fuzzyPinyinEnabled: (() -> Bool)? = nil) {
         self.store = store
         self.segmenter = PinyinSegmenter(syllables: store.syllables)
+        self.userFreq = userFreq ?? .shared
+        self.userFreqEnabled = userFreqEnabled ?? { UserPrefs.userFreq }
+        self.fuzzyPinyinEnabled = fuzzyPinyinEnabled ?? { UserPrefs.fuzzyPinyin }
     }
 
     public struct Candidate {
@@ -37,31 +45,11 @@ public final class CandidateEngine {
         var fuzzyVariants: [String] = []
         var userHitCount = 0
         // 设置快照(每查询读一次 UserDefaults;逐候选读实测热循环 +80%)
-        let fuzzyOn = UserPrefs.fuzzyPinyin
-        let userFreqOn = UserPrefs.userFreq
+        let fuzzyOn = fuzzyPinyinEnabled()
+        let userFreqOn = userFreqEnabled()
 
-        // 用户词库: 上屏过的词按其拼音键直查(kb26)——最高优先档,「打得越多权重越高」
-        if userFreqOn {
-            for uh in UserFreq.shared.hits(key: rawInput, partialPrefix: false) {
-                userHitCount += 1
-                best[uh.word] = Candidate(text: uh.word, pinyin: uh.pinyin,
-                                          score: UserFreq.shared.userScore(count: uh.count), isUser: true)
-            }
-        }
-
-        // 简拼: 整串字母作为首字母缩写键直查(awsl→啊我死了/阿伟死了,n→你),与音节切分互补;
-        // 缩写键由编译期派生(rime abbrev 等价),只取 key 恰好等于输入串的记录
-        for hit in store.query(prefix: rawInput, exactCap: 24, extCap: 8, scanBudget: 20_000) {
-            guard hit.key == rawInput else { break }
-            let score = Double(hit.weight)
-            if let old = best[hit.word], old.score >= score { continue }
-            best[hit.word] = Candidate(text: hit.word, pinyin: hit.key, score: score)
-        }
-
-        let segs = segmenter.segment(rawInput)
-        var primaryFullExact = false // 主路径完整键在词库有整句短语 → 不做词格组句
-        // 去重: 同档比分数;全覆盖候选永远压过同词的部分覆盖条目;
-        // 用户档同文不被词典候选覆盖(用户词永居最高档)
+        // Keep one merge rule for whole-code and syllable user hits. A high
+        // dictionary weight must not demote a learned word from the user tier.
         func upsert(_ nc: Candidate) {
             if let old = best[nc.text] {
                 if old.isUser != nc.isUser {
@@ -74,6 +62,27 @@ public final class CandidateEngine {
             }
             best[nc.text] = nc
         }
+
+        // 用户词库: 上屏过的词按其拼音键直查(kb26)——最高优先档,「打得越多权重越高」
+        if userFreqOn {
+            for uh in userFreq.hits(key: rawInput, partialPrefix: false) {
+                userHitCount += 1
+                upsert(Candidate(text: uh.word, pinyin: uh.pinyin,
+                                 score: userFreq.userScore(count: uh.count), isUser: true))
+            }
+        }
+
+        // 简拼: 整串字母作为首字母缩写键直查(awsl→啊我死了/阿伟死了,n→你),与音节切分互补;
+        // 缩写键由编译期派生(rime abbrev 等价),只取 key 恰好等于输入串的记录
+        for hit in store.query(prefix: rawInput, exactCap: 24, extCap: 8, scanBudget: 20_000) {
+            guard hit.key == rawInput else { break }
+            let score = Double(hit.weight)
+            upsert(Candidate(text: hit.word, pinyin: hit.key, score: score))
+        }
+
+        let segs = segmenter.segment(rawInput)
+        var primaryFullExact = false // 主路径完整键在词库有整句短语 → 不做词格组句
+        // 去重规则同样保护用户档及全覆盖候选。
         for (si, seg) in segs.enumerated() {
             let key = seg.syllables.joined(separator: " ")
             let keyFactor = seg.trailingPartial ? 0.45 : 1.0
@@ -128,20 +137,20 @@ public final class CandidateEngine {
                 // 用户词库: 与本键一致的已上屏词直查(缩写展开键放行=简拼混输能命中,模糊变体键不放行);
                 // partialPrefix 允许尾音节未打全(词条拼音以 key 为前缀)
                 if !fuzzyVariants.contains(q.key), userFreqOn {
-                    for uh in UserFreq.shared.hits(key: q.key, partialPrefix: seg.trailingPartial) {
+                    for uh in userFreq.hits(key: q.key, partialPrefix: seg.trailingPartial) {
                         segUserHits += 1
                         upsert(Candidate(text: uh.word, pinyin: uh.pinyin,
-                                         score: UserFreq.shared.userScore(count: uh.count), isUser: true))
+                                         score: userFreq.userScore(count: uh.count), isUser: true))
                     }
                 }
             }
             // 宽松兜底: 快路径无命中时逐音节前缀匹配——中间音节没打全(mebengz 的 me⊂mei)与
             // 缩写音节(zhedm 的 d⊂de、m⊂ma)都能命中用户词
             if segUserHits == 0, userFreqOn, seg.trailingPartial || seg.abbrevFlags.contains(true) {
-                for uh in UserFreq.shared.looseHits(key: key, limit: 5) {
+                for uh in userFreq.looseHits(key: key, limit: 5) {
                     segUserHits += 1
                     upsert(Candidate(text: uh.word, pinyin: uh.pinyin,
-                                     score: UserFreq.shared.userScore(count: uh.count), isUser: true))
+                                     score: userFreq.userScore(count: uh.count), isUser: true))
                 }
             }
             userHitCount += segUserHits
@@ -175,7 +184,7 @@ public final class CandidateEngine {
             }
         }
         var ranked = Array(best.values)
-        for i in ranked.indices { ranked[i].score *= UserFreq.shared.boost(ranked[i].text, enabled: userFreqOn) } // 用户词频: 档内选用越多越靠前
+        for i in ranked.indices { ranked[i].score *= userFreq.boost(ranked[i].text, enabled: userFreqOn) } // 用户词频: 档内选用越多越靠前
         // 三档排序: 用户词库命中(最高,压过一切词典候选) > 全键覆盖 > 渐进前缀;档内按分数
         func tier(_ c: Candidate) -> Int { c.isUser ? 2 : (c.coversInput ? 1 : 0) }
         let out = Array(ranked.sorted { a, b in

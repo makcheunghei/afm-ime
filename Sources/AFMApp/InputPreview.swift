@@ -9,6 +9,7 @@ enum InputSettingsMode: String, CaseIterable, Identifiable {
 }
 
 /// 設定中心的唯讀預覽：查詢正式詞庫，不提交文字、不記錄選字，也不呼叫 AI。
+@MainActor
 final class InputPreviewModel: ObservableObject {
     @Published var code = "aa" {
         didSet {
@@ -98,6 +99,16 @@ struct InputPreview: View {
     let mode: InputSettingsMode
     let fontSize: Double
 
+    private struct PreviewCandidate: Identifiable {
+        let index: Int
+        let text: String
+        var id: String { text }
+    }
+
+    private var visibleCandidates: [PreviewCandidate] {
+        preview.visibleIndices.map { PreviewCandidate(index: $0, text: preview.candidates[$0]) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("候選窗預覽", systemImage: "eye")
@@ -150,7 +161,8 @@ struct InputPreview: View {
                 Text("\(preview.page + 1)/\(preview.pageCount)").monospacedDigit()
             }
             .font(.caption).padding(.horizontal, 8).padding(.bottom, 5)
-            ForEach(Array(preview.visibleIndices), id: \.self) { index in
+            ForEach(visibleCandidates) { candidate in
+                let index = candidate.index
                 Button {
                     preview.select(index)
                     candidatesFocused = true
@@ -186,7 +198,8 @@ struct InputPreview: View {
     private var pinyinCandidates: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 12) {
-                ForEach(Array(preview.visibleIndices), id: \.self) { index in
+            ForEach(visibleCandidates) { candidate in
+                let index = candidate.index
                     HStack(spacing: 5) {
                         Text("\(index + 1)").font(.caption)
                         Text(preview.candidates[index]).font(.system(size: fontSize))

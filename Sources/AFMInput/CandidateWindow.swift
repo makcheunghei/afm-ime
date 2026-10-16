@@ -15,7 +15,7 @@ import IMECore
 // 水滴几何/渲染状态全在 CandidateDropletModel(@Published 非宏,视图直写局部刷新)。
 
 struct CandidateItem: Identifiable, Equatable {
-    var id: Int { index }
+    var id: String { text }
     let index: Int      // 全局下标(跨窗口连续)
     let text: String
     let isAI: Bool      // FM 重排提到首位时显示 ✦
@@ -788,7 +788,7 @@ final class CandidateWindowController {
 
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
-        let p = NSPanel(
+        let p = NonKeyPanel(
             contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
@@ -858,7 +858,7 @@ final class CandidateWindowController {
         (glassView ?? barHosting)?.frame = barRect
         overlayHosting?.frame = container.bounds
 
-        let visible = NSScreen.main?.visibleFrame
+        let visible = screen(for: caretRect)?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         // 先按玻璃条矩形定位(伴随面板锚点同款),再换算回面板原点
@@ -871,6 +871,8 @@ final class CandidateWindowController {
             barOrigin.x = min(max(barOrigin.x, visible.minX + 4),
                               max(visible.minX + 4, visible.maxX - barSize.width - 4))
         }
+        barOrigin.y = min(max(barOrigin.y, visible.minY + 4),
+                          max(visible.minY + 4, visible.maxY - barSize.height - 4))
         panel.setFrameOrigin(NSPoint(x: barOrigin.x - Self.marginH, y: barOrigin.y - Self.marginV))
         panel.orderFront(nil)
         DebugLog.log("水滴布局 panel=\(NSStringFromRect(panel.frame)) container=\(NSStringFromRect(container.frame)) glass=\(NSStringFromRect((glassView ?? barHosting)?.frame ?? .null)) overlay=\(NSStringFromRect(overlayHosting?.frame ?? .null)) row=\(NSStringFromRect(droplet.rowFrame))")
@@ -934,7 +936,7 @@ final class CandidateWindowController {
 
     private func ensureQuickPanel() -> NSPanel {
         if let quickPanel { return quickPanel }
-        let panel = NSPanel(
+        let panel = NonKeyPanel(
             contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)

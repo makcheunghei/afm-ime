@@ -10,8 +10,8 @@ import Foundation
 /// 合入本地库(只补缺失词,已有词取较大次数、拼音仅缺省才补),文件更新 version 后自动补种;
 /// 删除过的词经墓碑表(AFMUserWordsDeleted)挡住,不随版本升级复活。
 /// 跨进程:设置中心进程会直接改写 defaults(导入/删除/清空),经 Darwin 通知广播(CFNotificationCenter,
-/// libnotify 的 notify_* 在 Swift 无模块可 import),本类收到后丢弃防抖窗口内的未落盘改动并重读——
-/// 外部改动优先于内存副本(防删掉的词被引擎下次保存复活)。
+/// libnotify 的 notify_* 在 Swift 无模块可 import)。本类收到后把本地未落盘次数增量合到外部基准；
+/// 墓碑删除优先。清空操作更新 UUID marker，明确丢弃所有 pending 增量。
 /// 主线程访问(engine 查询与 InputController 上屏都在主线程;Darwin 中心回调走注册线程的 run loop,
 /// 注册发生在主线程 init)。
 public final class UserFreq {
@@ -23,6 +23,8 @@ public final class UserFreq {
     private static let maxWordLen = 50     // 整句/长文本(FM 整句、剪贴板)不进词频
     private static let seededVersionKey = "AFMBuiltinUserWordsSeeded"
     private static let deletedSeedsKey = "AFMUserWordsDeleted"
+    /// 设置中心清空词库时写入新的 UUID，明确令引擎丢弃所有未落盘学习增量。
+    public static let clearMarkerKey = "AFMUserWordsClearMarker"
 
     /// 设置中心 → 引擎 的跨进程变更广播名(Darwin 通知)
     public static let externalChangeNotify = "moe.bemly.inputmethod.AfmIME.userdict.changed"
@@ -30,7 +32,13 @@ public final class UserFreq {
     private let defaults: UserDefaults
     private var counts: [String: Int]
     private var pinyins: [String: String]
+    private var persistedCounts: [String: Int]
+    private var persistedPinyins: [String: String]
+    private var pendingCounts: [String: Int] = [:]
+    private var pendingPinyins: [String: String] = [:]
+    private var observedClearMarker: String?
     private var saveScheduled = false
+    private var saveToken = UUID()
     private var observing = false
 
     // 派生索引(懒重建): 拼音有序表(前缀二分,缓存音节数组供宽松匹配) + 简拼索引
@@ -40,17 +48,21 @@ public final class UserFreq {
 
     /// builtinWordsURL 仅测试用(nil = 从 Bundle.main Resources 找 builtin-user-words.json;
     /// 设置中心 helper bundle 也放了同款资源,先启动的是谁都完成补种)
-    public init(defaults: UserDefaults = .standard, builtinWordsURL: URL? = nil) {
+    public init(defaults: UserDefaults = .standard, builtinWordsURL: URL? = nil,
+                observesExternalChanges: Bool = true) {
         self.defaults = defaults
         self.counts = defaults.dictionary(forKey: Self.storeKey) as? [String: Int] ?? [:]
         self.pinyins = defaults.dictionary(forKey: Self.pinyinStoreKey) as? [String: String] ?? [:]
+        self.persistedCounts = self.counts
+        self.persistedPinyins = self.pinyins
+        self.observedClearMarker = defaults.string(forKey: Self.clearMarkerKey)
         // 迁移: 清洗历史脏键(缩写键「的=d」/半截尾音节「好下=hao x」——教训是逐音节 ≥2 字母才收)
         let bad = pinyins.filter { !Self.isValidPinyin($0.value) }.map(\.key)
         if !bad.isEmpty {
             for k in bad { pinyins.removeValue(forKey: k) }
             defaults.set(pinyins, forKey: Self.pinyinStoreKey)
         }
-        observeExternalChanges()
+        if observesExternalChanges { observeExternalChanges() }
         seedBuiltinWordsIfNeeded(url: builtinWordsURL ?? Bundle.main.url(forResource: "builtin-user-words", withExtension: "json"))
     }
 
@@ -79,14 +91,68 @@ public final class UserFreq {
         observing = true
     }
 
-    /// 外部(设置中心)改写了 defaults:重读并取消待落盘的防抖保存——内存副本里的未落盘改动
-    /// 会被丢弃(最多丢 2s 防抖窗口内的计数,外部改动优先)
-    private func reloadFromDefaults() {
-        counts = defaults.dictionary(forKey: Self.storeKey) as? [String: Int] ?? [:]
-        pinyins = defaults.dictionary(forKey: Self.pinyinStoreKey) as? [String: String] ?? [:]
-        saveScheduled = false
+    /// 外部(设置中心)改写 defaults:合并本地未落盘增量；墓碑删除及清空 marker 优先。
+    func reloadFromDefaults() {
+        let externalCounts = defaults.dictionary(forKey: Self.storeKey) as? [String: Int] ?? [:]
+        let externalPinyins = defaults.dictionary(forKey: Self.pinyinStoreKey) as? [String: String] ?? [:]
+        let clearMarker = defaults.string(forKey: Self.clearMarkerKey)
+        invalidateScheduledSave()
+
+        if clearMarker != observedClearMarker {
+            // Explicit clear wins over all local increments and pending pinyin.
+            pendingCounts.removeAll()
+            pendingPinyins.removeAll()
+            counts = externalCounts
+            pinyins = externalPinyins
+            let tombstones = Set(defaults.stringArray(forKey: Self.deletedSeedsKey) ?? [])
+            for word in tombstones {
+                counts.removeValue(forKey: word)
+                pinyins.removeValue(forKey: word)
+            }
+        } else {
+            let tombstones = Set(defaults.stringArray(forKey: Self.deletedSeedsKey) ?? [])
+            var mergedCounts = externalCounts
+            var mergedPinyins = externalPinyins
+
+            // Deletion tombstones beat both persisted data and local pending increments.
+            for word in tombstones {
+                mergedCounts.removeValue(forKey: word)
+                mergedPinyins.removeValue(forKey: word)
+                pendingCounts.removeValue(forKey: word)
+                pendingPinyins.removeValue(forKey: word)
+            }
+
+            // Retain local increments while accepting a newer external base (for example import).
+            for (word, delta) in pendingCounts where !tombstones.contains(word) {
+                let base = max(externalCounts[word] ?? 0, persistedCounts[word] ?? 0)
+                mergedCounts[word] = Self.addCount(base, delta)
+            }
+
+            // An external pinyin edit wins when it differs from the last persisted value.
+            for (word, localPinyin) in pendingPinyins where !tombstones.contains(word) {
+                if let externalPinyin = externalPinyins[word],
+                   externalPinyin != persistedPinyins[word] {
+                    mergedPinyins[word] = externalPinyin
+                    pendingPinyins[word] = externalPinyin
+                } else {
+                    mergedPinyins[word] = localPinyin
+                }
+            }
+            counts = mergedCounts
+            pinyins = mergedPinyins
+        }
+
+        if counts.count > Self.maxEntries { trim() }
+
+        observedClearMarker = clearMarker
+        persistedCounts = externalCounts
+        persistedPinyins = externalPinyins
         indexDirty = true
         DebugLog.log("用户词: 收到外部变更,重读 defaults(\(counts.count) 条)")
+
+        if !pendingCounts.isEmpty || counts != externalCounts || pinyins != externalPinyins {
+            scheduleSave()
+        }
     }
 
     /// 删除墓碑:设置中心删除/清空词时记录,补种时跳过——被用户删掉的词不随种子版本升级复活。
@@ -141,6 +207,8 @@ public final class UserFreq {
         defaults.set(counts, forKey: Self.storeKey)
         defaults.set(pinyins, forKey: Self.pinyinStoreKey)
         defaults.set(version, forKey: Self.seededVersionKey)
+        persistedCounts = counts
+        persistedPinyins = pinyins
         DebugLog.log("用户词种子: builtin v\(version) 共 \(items.count) 条,新补词 \(added)/补拼音 \(pinyinAdded)/墓碑跳过 \(tombstoneSkipped)")
     }
 
@@ -148,10 +216,14 @@ public final class UserFreq {
     /// 合法时进用户词库(FM 整句等无真实拼音的不收)
     public func record(_ word: String, pinyin: String? = nil) {
         guard !word.isEmpty, word.count <= Self.maxWordLen else { return }
-        counts[word, default: 0] += 1
+        // An explicit selection after deletion means the user has relearned this word.
+        Self.untombstone(words: [word], defaults: defaults)
+        counts[word] = Self.addCount(counts[word] ?? 0, 1)
+        pendingCounts[word] = Self.addCount(pendingCounts[word] ?? 0, 1)
         if let p = pinyin, Self.isValidPinyin(p), word.count <= 12 {
             if pinyins[word] != p {
                 pinyins[word] = p
+                pendingPinyins[word] = p
                 indexDirty = true
             }
         }
@@ -163,7 +235,12 @@ public final class UserFreq {
     /// 用户词库打分:随使用次数单调增长(「打得越多权重越高」;仅决定用户词之间的相对次序,
     /// 用户词整体已处于最高优先档)
     public func userScore(count: Int) -> Double {
-        20_000 + 15_000 * log10(Double(1 + count))
+        20_000 + 15_000 * log10(Double(count) + 1)
+    }
+
+    private static func addCount(_ base: Int, _ increment: Int) -> Int {
+        let (sum, overflow) = base.addingReportingOverflow(increment)
+        return overflow ? .max : sum
     }
 
     /// 用户词库命中: 词条拼音与 key 完全一致;partialPrefix 时允许词条拼音以 key 为前缀(尾音节未打全);
@@ -238,6 +315,8 @@ public final class UserFreq {
         for k in drop {
             counts.removeValue(forKey: k)
             pinyins.removeValue(forKey: k)
+            pendingCounts.removeValue(forKey: k)
+            pendingPinyins.removeValue(forKey: k)
         }
         indexDirty = true
     }
@@ -257,11 +336,32 @@ public final class UserFreq {
     private func scheduleSave() {
         guard !saveScheduled else { return }
         saveScheduled = true
+        let token = saveToken
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self else { return }
+            guard let self, self.saveToken == token else { return }
+            let externalCounts = self.defaults.dictionary(forKey: Self.storeKey) as? [String: Int] ?? [:]
+            let externalPinyins = self.defaults.dictionary(forKey: Self.pinyinStoreKey) as? [String: String] ?? [:]
+            let externalMarker = self.defaults.string(forKey: Self.clearMarkerKey)
+            if externalMarker != self.observedClearMarker
+                || externalCounts != self.persistedCounts
+                || externalPinyins != self.persistedPinyins {
+                // A cross-process write may become visible just before its Darwin
+                // notification. Merge it before saving so this debounce cannot race it.
+                self.reloadFromDefaults()
+                return
+            }
             self.saveScheduled = false
             self.defaults.set(self.counts, forKey: Self.storeKey)
             self.defaults.set(self.pinyins, forKey: Self.pinyinStoreKey)
+            self.persistedCounts = self.counts
+            self.persistedPinyins = self.pinyins
+            self.pendingCounts.removeAll()
+            self.pendingPinyins.removeAll()
         }
+    }
+
+    private func invalidateScheduledSave() {
+        saveToken = UUID()
+        saveScheduled = false
     }
 }

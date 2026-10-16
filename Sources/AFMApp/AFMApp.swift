@@ -13,8 +13,19 @@ private let imeDomain = "moe.bemly.inputmethod.AfmIME"
 
 // MARK: - 数据模型
 
+@MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
+
+    typealias TranslateOperation = (String) async -> String?
+    typealias CloudProbeOperation = (String, String, String, String) async -> String
+
+    private let defaults: UserDefaults
+    private let navigationDefaults: UserDefaults
+    private let translateOperation: TranslateOperation
+    private let cloudProbeOperation: CloudProbeOperation
+    private(set) var translateTask: Task<Void, Never>?
+    private(set) var cloudProbeTask: Task<Void, Never>?
 
     enum Tab: String, Identifiable, CaseIterable {
         case settings, dict, user, translate, model, test, maintenance
@@ -43,9 +54,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    @Published var tab: Tab = Tab(rawValue: UserDefaults.standard.string(forKey: "AFMSettingsLastPane") ?? "") ?? .settings {
+    @Published var tab: Tab = .settings {
         didSet {
-            UserDefaults.standard.set(tab.rawValue, forKey: "AFMSettingsLastPane")
+            navigationDefaults.set(tab.rawValue, forKey: "AFMSettingsLastPane")
             if tab != .settings { stopRecording() }
         }
     }
@@ -122,11 +133,21 @@ final class AppModel: ObservableObject {
         ("custom", "自訂", "", "openai", ""),
     ]
     @Published var cloudEnabled: Bool { didSet { write(ModelPrefs.cloudEnabledKey, cloudEnabled) } }
-    @Published var cloudProvider: String { didSet { write(ModelPrefs.cloudProviderKey, cloudProvider); applyCloudPreset() } }
-    @Published var cloudBaseURL: String { didSet { write(ModelPrefs.cloudBaseURLKey, cloudBaseURL) } }
-    @Published var cloudAPIKey: String { didSet { write(ModelPrefs.cloudAPIKeyKey, cloudAPIKey) } }
-    @Published var cloudModel: String { didSet { write(ModelPrefs.cloudModelKey, cloudModel) } }
-    @Published var cloudFormat: String { didSet { write(ModelPrefs.cloudFormatKey, cloudFormat) } }
+    @Published var cloudProvider: String {
+        didSet { write(ModelPrefs.cloudProviderKey, cloudProvider); invalidateCloudTest(); applyCloudPreset() }
+    }
+    @Published var cloudBaseURL: String {
+        didSet { write(ModelPrefs.cloudBaseURLKey, cloudBaseURL); invalidateCloudTest() }
+    }
+    @Published var cloudAPIKey: String {
+        didSet { write(ModelPrefs.cloudAPIKeyKey, cloudAPIKey); invalidateCloudTest() }
+    }
+    @Published var cloudModel: String {
+        didSet { write(ModelPrefs.cloudModelKey, cloudModel); invalidateCloudTest() }
+    }
+    @Published var cloudFormat: String {
+        didSet { write(ModelPrefs.cloudFormatKey, cloudFormat); invalidateCloudTest() }
+    }
     // 提示词 = 草稿-应用模式(kb36.1):编辑框预填当前生效值(覆盖 ?? 内置默认),编辑不落盘,
     // 点「应用」才写入(与内置一致的草稿会清掉覆盖键,保证内置更新可跟随);引擎/helper 现读现判
     @Published var promptRerank = ""
@@ -136,6 +157,7 @@ final class AppModel: ObservableObject {
     @Published var promptAppliedHint = ""
     @Published var cloudTestResult = ""
     @Published var cloudTesting = false
+    private var cloudTestGeneration = 0
 
     /// 选预设 → 自动填接口地址/格式/模型名(自訂不覆盖已填内容)
     private func applyCloudPreset() {
@@ -145,27 +167,39 @@ final class AppModel: ObservableObject {
         if !p.model.isEmpty { cloudModel = p.model }
     }
 
+    private func invalidateCloudTest() {
+        cloudTestGeneration &+= 1
+        cloudProbeTask?.cancel()
+        cloudProbeTask = nil
+        cloudTesting = false
+        cloudTestResult = ""
+    }
+
     func testCloud() {
-        guard #available(macOS 27.0, *) else {
-            cloudTestResult = "雲端 AI 需要 macOS 27 或以上；目前可使用本機 AI 及詞庫輸入。"
-            return
-        }
         guard !cloudTesting else { return }
         cloudTesting = true
         cloudTestResult = ""
-        Task {
-            let out = await CloudProviderModel.probe(baseURL: cloudBaseURL, apiKey: cloudAPIKey,
-                                                     modelName: cloudModel, wireFormat: cloudFormat)
-            await MainActor.run {
-                cloudTesting = false
-                cloudTestResult = out
-            }
+        cloudTestGeneration &+= 1
+        let generation = cloudTestGeneration
+        let baseURL = cloudBaseURL
+        let apiKey = cloudAPIKey
+        let modelName = cloudModel
+        let wireFormat = cloudFormat
+        let operation = cloudProbeOperation
+        cloudProbeTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            let out = await operation(baseURL, apiKey, modelName, wireFormat)
+            guard !Task.isCancelled, let self,
+                  generation == self.cloudTestGeneration else { return }
+            self.cloudTesting = false
+            self.cloudTestResult = out
+            self.cloudProbeTask = nil
         }
     }
 
     /// 应用提示词草稿:与内置默认一致的段落清掉覆盖键(跟随内置更新),其余写入
     func applyPrompts() {
-        let d = Self.imeDefaults
+        let d = defaults
         let pairs: [(key: String, value: String, def: String)] = [
             (ModelPrefs.promptRerankKey, promptRerank, FMReranker.defaultRerankInstructions),
             (ModelPrefs.promptSentenceKey, promptSentence, FMReranker.defaultSentenceInstructions),
@@ -195,9 +229,19 @@ final class AppModel: ObservableObject {
     }
 
     // 翻译(端侧 FM,与引擎进程共用 IMECore.FMReranker;方向自动:含中文→英,否则→中)
-    @Published var translateInput = ""
+    @Published var translateInput = "" {
+        didSet {
+            guard translateInput != oldValue else { return }
+            translateRequestGeneration &+= 1
+            translateTask?.cancel()
+            translateTask = nil
+            translating = false
+            translateResult = ""
+        }
+    }
     @Published var translateResult = ""
     @Published var translating = false
+    private var translateRequestGeneration = 0
 
     var translateDirection: String {
         if translateInput.trimmingCharacters(in: .whitespaces).isEmpty { return "自動" }
@@ -208,14 +252,20 @@ final class AppModel: ObservableObject {
     func submitTranslate() {
         let text = translateInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !translating else { return }
+        translateTask?.cancel()
         translating = true
         translateResult = ""
-        Task {
-            let out = await FMReranker.shared.translate(text)
-            await MainActor.run {
-                translating = false
-                translateResult = out ?? "翻譯未完成，本機模型暫時不可用或未有回應。"
-            }
+        translateRequestGeneration &+= 1
+        let generation = translateRequestGeneration
+        let operation = translateOperation
+        translateTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            let out = await operation(text)
+            guard !Task.isCancelled, let self,
+                  generation == self.translateRequestGeneration else { return }
+            self.translating = false
+            self.translateResult = out ?? "翻譯未完成，本機模型暫時不可用或未有回應。"
+            self.translateTask = nil
         }
     }
 
@@ -223,8 +273,24 @@ final class AppModel: ObservableObject {
         UserDefaults(suiteName: imeDomain) ?? .standard
     }
 
-    init() {
-        let d = Self.imeDefaults
+    init(
+        defaults: UserDefaults? = nil,
+        translate: @escaping TranslateOperation = { text in await FMReranker.shared.translate(text) },
+        cloudProbe: @escaping CloudProbeOperation = { baseURL, apiKey, modelName, wireFormat in
+            guard #available(macOS 27.0, *) else {
+                return "雲端 AI 需要 macOS 27 或以上；目前可使用本機 AI 及詞庫輸入。"
+            }
+            return await CloudProviderModel.probe(baseURL: baseURL, apiKey: apiKey,
+                                                  modelName: modelName, wireFormat: wireFormat)
+        },
+        loadDictionary: Bool = true
+    ) {
+        let d = defaults ?? Self.imeDefaults
+        self.defaults = d
+        self.navigationDefaults = defaults ?? .standard
+        self.translateOperation = translate
+        self.cloudProbeOperation = cloudProbe
+        tab = Tab(rawValue: navigationDefaults.string(forKey: "AFMSettingsLastPane") ?? "") ?? .settings
         fuzzy = d.object(forKey: "AFMFuzzyPinyin") as? Bool ?? true
         fullWidthPunct = d.object(forKey: "AFMFullWidthPunct") as? Bool ?? true
         fmEnhance = d.object(forKey: "AFMFMEnhance") as? Bool ?? true
@@ -245,21 +311,26 @@ final class AppModel: ObservableObject {
         promptSentence = (d.string(forKey: ModelPrefs.promptSentenceKey) ?? "").isEmpty ? FMReranker.defaultSentenceInstructions : d.string(forKey: ModelPrefs.promptSentenceKey)!
         promptTranslateEN = (d.string(forKey: ModelPrefs.promptTranslateENKey) ?? "").isEmpty ? FMReranker.defaultTranslateENInstructions : d.string(forKey: ModelPrefs.promptTranslateENKey)!
         promptTranslateZH = (d.string(forKey: ModelPrefs.promptTranslateZHKey) ?? "").isEmpty ? FMReranker.defaultTranslateZHInstructions : d.string(forKey: ModelPrefs.promptTranslateZHKey)!
-        loadStore()
+        if loadDictionary { loadStore() }
         reloadUserRows()
         loadHotkeys()
     }
 
+    deinit {
+        translateTask?.cancel()
+        cloudProbeTask?.cancel()
+    }
+
     private func write(_ key: String, _ value: Bool) {
-        Self.imeDefaults.set(value, forKey: key)
+        defaults.set(value, forKey: key)
         NSLog("[AFMApp] 设置 \(key) = \(value)")
     }
     private func write(_ key: String, _ value: Int) {
-        Self.imeDefaults.set(value, forKey: key)
+        defaults.set(value, forKey: key)
         NSLog("[AFMApp] 设置 \(key) = \(value)")
     }
     private func write(_ key: String, _ value: String) {
-        Self.imeDefaults.set(value, forKey: key)
+        defaults.set(value, forKey: key)
         if key == ModelPrefs.cloudAPIKeyKey {
             NSLog("[AFMApp] 雲端憑證已更新")
         } else {
@@ -270,7 +341,7 @@ final class AppModel: ObservableObject {
     // MARK: 快捷键(kb35)
 
     private func loadHotkeys() {
-        let d = Self.imeDefaults
+        let d = defaults
         hotkeyRows = Self.hotkeySlots.map { slot in
             let custom = d.object(forKey: slot.key) != nil
             let disp = d.string(forKey: slot.displayKey) ?? slot.fallbackDisplay
@@ -279,7 +350,7 @@ final class AppModel: ObservableObject {
     }
 
     private func effectiveCode(_ slot: (key: String, displayKey: String, fallback: Int, fallbackDisplay: String, title: String)) -> Int {
-        Self.imeDefaults.object(forKey: slot.key) as? Int ?? slot.fallback
+        defaults.object(forKey: slot.key) as? Int ?? slot.fallback
     }
 
     func startRecording(_ id: String) {
@@ -301,8 +372,8 @@ final class AppModel: ObservableObject {
 
     func resetHotkeys() {
         for slot in Self.hotkeySlots {
-            Self.imeDefaults.removeObject(forKey: slot.key)
-            Self.imeDefaults.removeObject(forKey: slot.displayKey)
+            defaults.removeObject(forKey: slot.key)
+            defaults.removeObject(forKey: slot.displayKey)
         }
         NSLog("[AFMApp] 快捷键全部恢复默认")
         loadHotkeys()
@@ -324,8 +395,8 @@ final class AppModel: ObservableObject {
             hotkeyHint = "與「\(dup.title)」重複，請選另一個按鍵。"
             return
         }
-        Self.imeDefaults.set(Int(ev.keyCode), forKey: slot.key)
-        Self.imeDefaults.set(display, forKey: slot.displayKey)
+        defaults.set(Int(ev.keyCode), forKey: slot.key)
+        defaults.set(display, forKey: slot.displayKey)
         NSLog("[AFMApp] 快捷键 \(slot.key) = ⌃\(display) (keyCode \(ev.keyCode))")
         loadHotkeys()
         stopRecording()
@@ -370,10 +441,13 @@ final class AppModel: ObservableObject {
 
     func reloadDict() {
         guard let store else { return }
-        let term = dictSearch.lowercased().filter { ("a"..."z").contains($0) }
-        if term.isEmpty {
+        let rawTerm = dictSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let term = rawTerm.filter { ("a"..."z").contains($0) }
+        if rawTerm.isEmpty {
             // 浏览模式: 按存储序分页(每页 100 条)
             dictRows = store.records(from: dictPage * 100, limit: 100)
+        } else if term.isEmpty {
+            dictRows = []
         } else {
             let hits = store.query(prefix: term, exactCap: 40, extCap: 40, scanBudget: 200_000)
             dictRows = hits.map { DictStore.RecordInfo(key: $0.key, word: $0.word, weight: $0.weight) }
@@ -385,12 +459,16 @@ final class AppModel: ObservableObject {
         return max(1, (store.recordCount + 99) / 100)
     }
 
+    var isSearchingDict: Bool {
+        !dictSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     // MARK: 用户词
 
     func reloadUserRows() {
-        let uf = UserFreq(defaults: Self.imeDefaults) // 复用打分公式(打分域 = IME 域)
-        let counts = Self.imeDefaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
-        let pins = Self.imeDefaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
+        let uf = UserFreq(defaults: defaults, observesExternalChanges: false)
+        let counts = defaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
+        let pins = defaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
         userRows = counts
             .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
             .map { (word, count) in
@@ -400,23 +478,24 @@ final class AppModel: ObservableObject {
     }
 
     func deleteUser(_ word: String) {
-        var counts = Self.imeDefaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
-        var pins = Self.imeDefaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
+        var counts = defaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
+        var pins = defaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
         counts.removeValue(forKey: word)
         pins.removeValue(forKey: word)
-        Self.imeDefaults.set(counts, forKey: "AFMUserFreq")
-        Self.imeDefaults.set(pins, forKey: "AFMUserPinyin")
-        UserFreq.tombstone(words: [word], defaults: Self.imeDefaults) // 删过的不随内置种子版本升级复活
+        defaults.set(counts, forKey: "AFMUserFreq")
+        defaults.set(pins, forKey: "AFMUserPinyin")
+        UserFreq.tombstone(words: [word], defaults: defaults) // 删过的不随内置种子版本升级复活
         NSLog("[AFMApp] 删除用户词 '\(word)'")
         UserFreq.postExternalChange() // 引擎内存副本持有旧表,不广播会被下次防抖保存复活
         reloadUserRows()
     }
 
     func clearUsers() {
-        let counts = Self.imeDefaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
-        UserFreq.tombstone(words: Array(counts.keys), defaults: Self.imeDefaults) // 清空前全部记墓碑
-        Self.imeDefaults.removeObject(forKey: "AFMUserFreq")
-        Self.imeDefaults.removeObject(forKey: "AFMUserPinyin")
+        let counts = defaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
+        UserFreq.tombstone(words: Array(counts.keys), defaults: defaults) // 清空前全部记墓碑
+        defaults.removeObject(forKey: "AFMUserFreq")
+        defaults.removeObject(forKey: "AFMUserPinyin")
+        defaults.set(UUID().uuidString, forKey: UserFreq.clearMarkerKey)
         NSLog("[AFMApp] 清空用户词库(墓碑 \(counts.count) 条)")
         UserFreq.postExternalChange()
         reloadUserRows()
@@ -439,8 +518,8 @@ final class AppModel: ObservableObject {
             userMessage = "匯入失敗：JSON 格式不正確或缺少 words 陣列。"
             return
         }
-        var counts = Self.imeDefaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
-        var pins = Self.imeDefaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
+        var counts = defaults.dictionary(forKey: "AFMUserFreq") as? [String: Int] ?? [:]
+        var pins = defaults.dictionary(forKey: "AFMUserPinyin") as? [String: String] ?? [:]
         var added = 0, updated = 0, skipped = 0
         var importedWords: [String] = []
         for item in items {
@@ -460,9 +539,9 @@ final class AppModel: ObservableObject {
                 pins[word] = p
             }
         }
-        Self.imeDefaults.set(counts, forKey: "AFMUserFreq")
-        Self.imeDefaults.set(pins, forKey: "AFMUserPinyin")
-        UserFreq.untombstone(words: importedWords, defaults: Self.imeDefaults)
+        defaults.set(counts, forKey: "AFMUserFreq")
+        defaults.set(pins, forKey: "AFMUserPinyin")
+        UserFreq.untombstone(words: importedWords, defaults: defaults)
         UserFreq.postExternalChange()
         NSLog("[AFMApp] 导入用户词: 新增 \(added) 更新 \(updated) 跳过 \(skipped)(源 \(url.lastPathComponent))")
         userMessage = "匯入完成：新增 \(added) 條、更新 \(updated) 條\(skipped > 0 ? "、略過無效資料 \(skipped) 條" : "")；共 \(counts.count) 條。"

@@ -73,11 +73,14 @@ scripts/fetch_pinyin_dict.sh # 缺少 dict.bin 時，從固定上游發行版提
 python3 scripts/build_quick.py # 從 quickime/ 的原生 Windows 檔案生成 Data/quick.json
 scripts/package.sh          # 打包同時包含拼音及速成的 App
 scripts/test.sh             # Swift Testing 行為測試（包含 CLT framework 路徑處理）
+./script/build_and_run.sh --verify # 建置並啟動新設定中心，核實執行位置
 "build/AFM輸入法.app/Contents/MacOS/AFMInput" --check-quick # 打包後的資料／按鍵整合檢查
 # 有完整拼音源時，可用 scripts/build_dict.sh 重新編譯 dict.bin
 ```
 
 產物 `build/AFM輸入法.app` 包含輸入法引擎及內嵌設定中心（`Contents/PlugIns/AFMSettings.app`），頂層只有一個 App。速成原始資料及生成的詞庫不納入 Git；本地所需檔案與自訂來源參數見 [速成說明](docs/quick.md)。
+
+Codex 的 **Run** 按鈕使用 `script/build_and_run.sh`：結束舊設定中心、沿用正式打包流程建置，再啟動新 helper。此開發入口只開設定中心；日常輸入法繼續由系統管理正式安裝位置的引擎。`--logs`／`--telemetry` 會顯示設定中心的程序日誌，`--debug` 會在 App 啟動後附加 LLDB，能否附加由簽署及系統開發工具權限決定。更新實際輸入引擎仍使用已簽署 `.pkg`。
 
 - **首次安裝**：執行下述 `.pkg` 安裝包，安裝完成後在 macOS「系統設定 → 鍵盤 → 輸入方式 → 編輯」自行加入 AFM拼音或 AFM速成。首次未列出時，系統可能需要登出再登入；`scripts/post-login-check.sh` 只檢查，不改動來源。設定中心不再提供安裝、更新或刪除 App 檔案的功能。
 - **切換來源**：macOS 輸入來源列表分別提供「AFM拼音」及「AFM速成」。設定中心「輸入設定」工具列可選擇要調整的模式；此選項不會切換系統輸入來源。

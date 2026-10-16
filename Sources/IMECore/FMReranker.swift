@@ -34,6 +34,7 @@ public final class FMReranker {
     /// 都失败 → nil。label 仅用于日志区分(重排/整句/翻译)。
     private func respond(label: String, instructions: String, prompt: String,
                          cloudOverride: Bool? = nil) async -> String? {
+        guard !Task.isCancelled else { return nil }
         if #available(macOS 27.0, *), cloudOverride ?? ModelPrefs.cloudEnabled,
            let cfg = CloudProviderModel.configured() {
             let t0 = Date()
@@ -41,15 +42,19 @@ public final class FMReranker {
                 let session = LanguageModelSession(model: CloudProviderModel(config: cfg),
                                                    instructions: instructions)
                 let resp = try await session.respond(to: prompt)
+                guard !Task.isCancelled else { return nil }
                 let ms = String(format: "%.0f", -t0.timeIntervalSinceNow * 1000)
                 DebugLog.log("云端响应[\(label)](\(ms)ms, \(cfg.modelName)): '\(resp.content.prefix(40))'")
                 return resp.content
+            } catch is CancellationError {
+                return nil
             } catch {
+                guard !Task.isCancelled else { return nil }
                 let ms = String(format: "%.0f", -t0.timeIntervalSinceNow * 1000)
                 DebugLog.error("云端[\(label)]失败(\(ms)ms) → 回落端侧 FM: \(error)")
             }
         }
-        guard available else {
+        guard !Task.isCancelled, available else {
             DebugLog.log("FM 不可用 available=false [\(label)](云端未启用或已回落)")
             return nil
         }
@@ -59,10 +64,14 @@ public final class FMReranker {
                 model: SystemLanguageModel.default,
                 instructions: instructions)
             let resp = try await session.respond(to: prompt)
+            guard !Task.isCancelled else { return nil }
             let ms = String(format: "%.0f", -t0.timeIntervalSinceNow * 1000)
             DebugLog.log("FM 响应[\(label)](\(ms)ms): '\(resp.content.prefix(40))'")
             return resp.content
+        } catch is CancellationError {
+            return nil
         } catch {
+            guard !Task.isCancelled else { return nil }
             DebugLog.error("FM [\(label)]失败: \(error) (耗时\(String(format: "%.0f", -t0.timeIntervalSinceNow * 1000))ms)")
             return nil
         }

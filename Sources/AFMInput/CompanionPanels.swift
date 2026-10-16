@@ -178,8 +178,10 @@ struct ClipboardBarView: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                     .padding(.horizontal, 12).padding(.vertical, 10)
             } else {
-                ForEach(Array(model.items.enumerated()), id: \.offset) { i, text in
-                    HStack(spacing: 7) {
+                ForEach(model.items, id: \.self) { text in
+                    let i = model.items.firstIndex(of: text) ?? 0
+                    Button { model.onPick?(text) } label: {
+                      HStack(spacing: 7) {
                         Text("\(i + 1)")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
@@ -197,7 +199,10 @@ struct ClipboardBarView: View {
                             .fill(i == model.selected ? AnyShapeStyle(.white.opacity(0.22)) : AnyShapeStyle(.clear))
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { model.onPick?(text) }
+                      }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("剪貼簿 \(i + 1)，\(text)")
+                    .accessibilityAddTraits(i == model.selected ? [.isSelected] : [])
                 }
             }
             Text("点击或 1-9/⏎ 插入 · ↑↓ 选择 · Esc/⌃V 关闭 · 组词中请用点击")
@@ -377,17 +382,19 @@ struct TranslateBarView: View {
         .frame(width: 360)
         .padding(10)
         .onAppear { focused = true }
-        .onChange(of: model.focusToken) { _ in focused = true }
+        .onChange(of: model.focusToken) { _, _ in focused = true }
     }
 
     private func chip(_ label: String, action: @escaping () -> Void) -> some View {
-        Text(label)
+        Button(action: action) {
+          Text(label)
             .font(.system(size: 12))
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(Capsule().fill(.primary.opacity(0.10)))
             .contentShape(Capsule())
-            .onTapGesture(perform: action)
+        }
+        .buttonStyle(.plain)
     }
 }
 
