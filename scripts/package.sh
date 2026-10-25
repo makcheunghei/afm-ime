@@ -4,6 +4,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build
 
+# 缺字後備字型須與授權一同交付；不依賴使用者曾否安裝第三方字型。
+python3 - <<'PY'
+from pathlib import Path
+import hashlib
+root = Path('Data/Fonts')
+assert hashlib.sha256((root / 'HanaMinB.ttf').read_bytes()).hexdigest() == '829543436cdf7b4c6730e2af5806fa406f8ddf0d4b656e0cd49c58d4db1c8d3c', '後備字型缺失或內容不符'
+assert (root / 'LICENSE.txt').is_file(), '後備字型授權缺失'
+PY
+
 if [ ! -s Data/dict.bin ]; then
   zsh scripts/fetch_pinyin_dict.sh
 fi
@@ -132,6 +141,8 @@ cp Data/dict.bin "$APP/Contents/Resources/dict.bin"
 cp Data/builtin-user-words.json "$APP/Contents/Resources/builtin-user-words.json"  # 内置用户词种子(UserFreq 首启补种,kb40)
 # 原始資料由 mkstemp 生成時是 600；App 裝到系統目錄後，所有使用者都必須能讀取詞庫。
 install -m 644 Data/quick.json "$APP/Contents/Resources/quick.json"
+mkdir -p "$APP/Contents/Resources/Fonts"
+install -m 644 Data/Fonts/HanaMinB.ttf Data/Fonts/LICENSE.txt Data/Fonts/README.md "$APP/Contents/Resources/Fonts/"
 [ -n "$METALLIB" ] && cp "$METALLIB" "$APP/Contents/Resources/default.metallib"
 [ -n "$TISICON" ] && cp "$TISICON" "$APP/Contents/Resources/InputMenuTemplate.tiff"
 [ -n "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
@@ -178,8 +189,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.16.6</string>
-	<key>CFBundleVersion</key><string>2026101606</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.25.1</string>
+	<key>CFBundleVersion</key><string>2026102501</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
@@ -263,8 +274,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.16.6</string>
-	<key>CFBundleVersion</key><string>2026101606</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.25.1</string>
+	<key>CFBundleVersion</key><string>2026102501</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>

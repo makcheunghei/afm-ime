@@ -21,6 +21,8 @@ modes = info['ComponentInputModeDict']['tsInputModeListKey']
 assert len(modes) == 2 and len({m['TISInputSourceID'] for m in modes.values()}) == 2, '輸入模式 ID 必須唯一'
 assert all(not m.get('tsInputModeDefaultStateKey') for m in modes.values()), '來源須由使用者獨立加入，禁止自動補回'
 assert all(not m.get('tsInputModePrimaryInScriptKey') for m in modes.values()), '獨立來源不應強制保留主模式'
+assert (app / 'Contents/Resources/Fonts/HanaMinB.ttf').is_file(), '候選後備字型缺失'
+assert (app / 'Contents/Resources/Fonts/LICENSE.txt').is_file(), '候選後備字型授權缺失'
 for bundle in (app, app / 'Contents/PlugIns/AFMSettings.app'):
     metadata = plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())
     assert metadata.get('CFBundleName') == metadata.get('CFBundleDisplayName') == 'AFM輸入法', 'App 名稱必須一致'

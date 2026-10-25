@@ -1,6 +1,7 @@
 import AppKit
 import InputMethodKit
 import IMECore
+import CoreText
 
 // CLI 安装器模式(参考 squirrel --register-input-source 等)
 let cliArgs = CommandLine.arguments
@@ -144,6 +145,20 @@ func checkQuickData() -> Int32 {
           session.rawText.isEmpty, !session.isAssociation else {
         print("速成翻譯確認失敗"); return 1
     }
+    let ap = engine.candidates(for: "ap", fullCharset: true).joined()
+    for weight in [NSFont.Weight.regular, .semibold] {
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: ap,
+            attributes: [.font: CandidateFont.system(size: 15, weight: weight)]))
+        for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+            let font = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
+            var glyphs = [CGGlyph](repeating: 0, count: CTRunGetGlyphCount(run))
+            CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
+            guard !(CTFontCopyPostScriptName(font) as String).contains("LastResort"), !glyphs.contains(0) else {
+                print("速成 ap 擴展字後備字型驗證失敗"); return 1
+            }
+        }
+    }
+    print("ap 完整字集字形驗證通過（一般／選中粗體，無 LastResort 佔位字）")
     let start = Date()
     let lookupCodes = ["aa", "of", "ha", "hu", "a", "za", "bu", "ub", "nx", "ux"]
     var checkedCandidates = 0
@@ -159,7 +174,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261016-quick-layout"
+    static let buildTag = "20261025-candidate-font"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端

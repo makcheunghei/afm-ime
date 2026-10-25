@@ -25,7 +25,7 @@ struct QuickCandidateView: View {
         min(max(1, maximumWidth), preferredWidth)
     }
     private var preferredWidth: CGFloat {
-        let font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let font = CandidateFont.system(size: fontSize, weight: .semibold)
         if let translation {
             switch translation {
             case .ready(let text):
@@ -43,7 +43,7 @@ struct QuickCandidateView: View {
     }
 
     private var horizontalCellWidths: [CGFloat] {
-        let font = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+        let font = CandidateFont.system(size: fontSize, weight: .semibold)
         let natural = visibleItems.map { item in
             min(180, max(44, ceil((item.text as NSString).size(withAttributes: [.font: font]).width)
                          + 35 + (item.isAI ? 19 : 0)))
@@ -118,7 +118,7 @@ struct QuickCandidateView: View {
                     .monospacedDigit()
                     .frame(width: 12, alignment: .leading)
                 Text(item.text)
-                    .font(.system(size: fontSize, weight: item.index == selectedIndex ? .semibold : .regular))
+                    .font(Font(CandidateFont.system(size: fontSize, weight: item.index == selectedIndex ? .semibold : .regular)))
                     .lineLimit(isTranslation ? 4 : 1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -54,7 +54,9 @@ struct DictView: View {
                 if model.quickDictSection == .codes {
                     TableColumn("字根", value: \.roots).width(min: 100, ideal: 150)
                 }
-                TableColumn(model.quickDictSection == .codes ? "候選" : "續文", value: \.text).width(min: 120, ideal: 200)
+                TableColumn(model.quickDictSection == .codes ? "候選" : "續文") { row in
+                    Text(row.text).font(Font(CandidateFont.system(size: 13)))
+                }.width(min: 120, ideal: 200)
                 TableColumn("原序") { row in Text("\(row.position)").monospacedDigit().foregroundStyle(.secondary) }
                     .width(min: 65, ideal: 75)
             }
@@ -204,7 +206,7 @@ struct UserWordsView: View {
                 TableColumn("字碼", value: \.code).width(min: 90, ideal: 130)
                 TableColumn("字根", value: \.roots).width(min: 100, ideal: 150)
                 TableColumn("字詞") { row in
-                    Text(row.text).fontWeight(.medium).contextMenu {
+                    Text(row.text).font(Font(CandidateFont.system(size: 13, weight: .medium))).contextMenu {
                         Button("刪除「\(row.text)」", role: .destructive) { model.confirmQuickDelete = row }
                     }
                 }.width(min: 120, ideal: 200)

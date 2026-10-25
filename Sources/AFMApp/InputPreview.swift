@@ -171,7 +171,7 @@ struct InputPreview: View {
                         Text("\(index % preview.pageSize + 1)")
                             .font(.system(size: 11)).frame(width: 10)
                         Text(preview.candidates[index])
-                            .font(.system(size: fontSize, weight: preview.selectedIndex == index ? .semibold : .regular))
+                            .font(Font(CandidateFont.system(size: fontSize, weight: preview.selectedIndex == index ? .semibold : .regular)))
                             .lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
                     }

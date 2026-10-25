@@ -2,7 +2,7 @@
 
 同一個 macOS App 提供 **AFM拼音**及新增的 **AFM速成**兩個系統輸入來源，共用設定中心及 Liquid Glass 框架。拼音保留原有引擎、完整詞庫及模型功能；繁體速成使用從 Windows 提取的原生字碼及聯想資料，預設固定次序，完整字集、個人學習及 AI 重排均可獨立手動開啟。
 
-**純 Swift、無第三方依賴，最低部署版本 macOS 26。**可用 Xcode 27 或 Command Line Tools 27 構建；拼音水滴的 Metal 折射效果需要 Xcode Metal 工具鏈。AI 可使用本機 Apple Foundation Models；macOS 27 或以上亦可手動啟用已配置的雲端模型。macOS 26 的執行期相容性仍待實機驗收。
+**引擎以純 Swift 實作、無第三方程式庫，最低部署版本 macOS 26。**可用 Xcode 27 或 Command Line Tools 27 構建；拼音水滴的 Metal 折射效果需要 Xcode Metal 工具鏈。AI 可使用本機 Apple Foundation Models；macOS 27 或以上亦可手動啟用已配置的雲端模型。macOS 26 的執行期相容性仍待實機驗收。
 
 ![平台](https://img.shields.io/badge/macOS-26%2B%20(Apple%20Intelligence)-blue) ![构建](https://img.shields.io/badge/Swift-6.4%20·%20Xcode%2027-orange)
 
@@ -20,6 +20,8 @@
 - **已核對的 Windows 樣本**：`aa` 的 18 個候選及「你、晶、香、港、好、暑」六組聯想。全碼排序、擴展字篩選及其他字詞仍需逐步對照，現階段不保證所有字碼與 Windows 完全一致。資料來源、數量及驗證範圍見 [速成說明](docs/quick.md)。
 
 速成橫排以拼音候選條的方向呈現同頁最多九項，長候選會按螢幕寬度縮短顯示，可懸停查看全文；改變排列不改選字按鍵、候選次序或頁碼。設定中心預覽同步切換。候選面板使用單一系統原生標準 Liquid Glass 材質，選中列用輕量高亮，不疊加玻璃；外觀與設定中心的預覽一致，頂部只顯示頁碼，不另設透明度或色調覆蓋；macOS 27 自動跟隨系統透明度及輔助使用設定，macOS 26 使用預設效果。
+
+完整字集包含系統字型未覆蓋的擴展漢字。候選窗、預覽及速成詞庫／個人詞語表格會以 App 內的 HanaMinB 補上缺字，常用字維持系統字型；不更改候選次序，也不將佔位符當成文字提交。字型只於 AFM 程序內登記，來源、校驗碼及授權見 [字型說明](Data/Fonts/README.md)。其他應用程式顯示已輸出的文字時，仍取決於該應用程式的字型支援。
 
 App 圖示以帶陰影的灰色玻璃「速」字書法為主題，使用 Icon Composer 分層來源 `Data/AppIcon.icon`；Xcode 打包時編譯原生一般、深色及染色外觀，設定中心沿用系統圖示渲染。選單列則維持獨立的簡約「中」字模板。沒有 Xcode 的構建使用靜態圖示後備。
 
