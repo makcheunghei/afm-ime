@@ -189,13 +189,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.25.1</string>
-	<key>CFBundleVersion</key><string>2026102501</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.25.2</string>
+	<key>CFBundleVersion</key><string>2026102502</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>LSBackgroundOnly</key><false/>
 	<key>LSUIElement</key><true/>
-	<key>InputMethodConnectionName</key><string>moe.bemly.inputmethod.AfmIME_Connection</string>
 	<key>InputMethodServerControllerClass</key><string>afm_input.InputController</string>
 	<key>TISIntendedLanguage</key><string>zh-Hans</string>
 	<key>TICapsLockLanguageSwitchCapable</key><true/>
@@ -274,8 +273,8 @@ cat > "$HELPER/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleName</key><string>AFM輸入法</string>
 	<key>CFBundleDisplayName</key><string>AFM輸入法</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>2026.10.25.1</string>
-	<key>CFBundleVersion</key><string>2026102501</string>
+	<key>CFBundleShortVersionString</key><string>2026.10.25.2</string>
+	<key>CFBundleVersion</key><string>2026102502</string>
 	<key>NSPrincipalClass</key><string>NSApplication</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>NSHighResolutionCapable</key><true/>

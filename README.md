@@ -4,6 +4,8 @@
 
 **引擎以純 Swift 實作、無第三方程式庫，最低部署版本 macOS 26。**可用 Xcode 27 或 Command Line Tools 27 構建；拼音水滴的 Metal 折射效果需要 Xcode Metal 工具鏈。AI 可使用本機 Apple Foundation Models；macOS 27 或以上亦可手動啟用已配置的雲端模型。macOS 26 的執行期相容性仍待實機驗收。
 
+**2026.10.25.2 登入後無候選修正：**macOS 27.0.1 的 InputMethodKit 將第三方輸入法連線解析為 `<bundleID>.Connection`，舊版引擎卻監聽 `_Connection`，導致來源可選但收不到按鍵。現在與系統共用連線名稱解析，移除過時的 plist 覆寫；`--check-quick` 亦會列出解析結果。解析使用經能力檢查的非公開唯讀 selector，缺失時回退版本對應名稱；macOS 26 仍待實機驗收。背景測試共 128 項通過，包含系統解析回歸測試。
+
 ![平台](https://img.shields.io/badge/macOS-26%2B%20(Apple%20Intelligence)-blue) ![构建](https://img.shields.io/badge/Swift-6.4%20·%20Xcode%2027-orange)
 
 已發佈的可用基礎版為 **2026.10.15（macOS 27+）**：[下載安裝包及查看版本說明](https://github.com/makcheunghei/afm-ime/releases/tag/v2026.10.15)。安裝包已包含拼音及速成詞庫；由原始碼構建則須按下文準備詞庫資料。

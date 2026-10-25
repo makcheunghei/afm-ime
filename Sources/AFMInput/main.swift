@@ -27,6 +27,7 @@ if cliArgs.count > 1 {
 
 /// 資料與按鍵整合驗證；不初始化 IMKServer，不註冊或改變系統輸入來源。
 func checkQuickData() -> Int32 {
+    print("IMK 連線名稱：\(InputMethodConnection.name(for: .main))")
     if let controllerName = Bundle.main.object(forInfoDictionaryKey: "InputMethodServerControllerClass") as? String,
        NSClassFromString(controllerName) == nil {
         print("IMK controller 類別無法載入：\(controllerName)")
@@ -174,7 +175,7 @@ func checkQuickData() -> Int32 {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var server: IMKServer?
     /// 构建标记:日志里区分新旧进程(重装后防 launchd 复活旧二进制)
-    static let buildTag = "20261025-candidate-font"
+    static let buildTag = "20261025-imk-connection"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 幽灵副本自愈(必须先于 IMKServer 初始化——副本若用同一连接名起完整引擎,会劫持客户端
@@ -191,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { try p.run(); p.waitUntilExit() } catch { }
             exit(0)
         }
-        let connName = (Bundle.main.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String) ?? "AFMInput_Connection"
+        let connName = InputMethodConnection.name(for: .main)
         server = IMKServer(name: connName, bundleIdentifier: Bundle.main.bundleIdentifier)
         ClipboardMonitor.shared.start() // 剪贴板历史(⌃V 面板数据源,轮询 changeCount)
         ShiftModeMonitor.start() // Shift 中英切换监听(需输入监控权限,失败会记日志并在 activateServer 重试)
